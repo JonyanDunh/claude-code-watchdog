@@ -31,6 +31,7 @@ _A Claude Code plugin that keeps the current agent in a self-referential loop in
 ```bash
 /plugin marketplace add https://github.com/JonyanDunh/claude-code-watchdog
 /plugin install watchdog
+/reload-plugins
 ```
 
 **Step 2: Verify**
@@ -152,6 +153,7 @@ rm -f .claude/watchdog.*.local.json
 ```bash
 /plugin marketplace add https://github.com/JonyanDunh/claude-code-watchdog
 /plugin install watchdog
+/reload-plugins
 ```
 
 Verify with `/watchdog:help`.
