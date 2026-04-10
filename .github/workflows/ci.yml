@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "."
+          severity: warning
+        env:
+          SHELLCHECK_OPTS: -e SC2317
+
+  jsonlint:
+    name: Lint JSON manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Validate all JSON files
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            if ! jq empty "$f" 2>/tmp/jq-err; then
+              echo "::error file=$f::Invalid JSON"
+              cat /tmp/jq-err
+              fail=1
+            else
+              echo "ok: $f"
+            fi
+          done < <(find . -type f -name '*.json' ! -path './.git/*')
+          exit $fail
+
+  markdownlint:
+    name: Lint Markdown files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: |
+            **/*.md
+            !LICENSE
+            !NOTICE
+        continue-on-error: true

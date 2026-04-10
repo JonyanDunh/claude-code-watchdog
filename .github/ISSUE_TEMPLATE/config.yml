@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the README first
+    url: https://github.com/JonyanDunh/claude-code-watchdog#readme
+    about: Most usage questions are answered in the README (available in 7 languages).
+  - name: Security vulnerability
+    url: https://github.com/JonyanDunh/claude-code-watchdog/blob/master/SECURITY.md
+    about: Do not open public issues for security problems — see SECURITY.md for private disclosure.
