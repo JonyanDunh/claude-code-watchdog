@@ -60,7 +60,7 @@ Everything else is automatic. The agent never knows a loop is running.
 
 - **Zero agent cheating** — The agent is never told it is inside a loop. No `systemMessage`, no iteration counter, no setup banner. It cannot short-circuit by emitting a fake completion signal.
 - **Forced tool verification** — A pure-text turn ("I've checked, all good") never ends the loop. The agent **must** actually invoke a tool before exit is even considered.
-- **LLM-judged, universal file-change detection** — A headless `claude -p --model haiku` call is the **only** judge of "did this turn modify any file". It reads the turn's tool invocations (tool name + raw Bash command text) and decides semantically whether **any** file on disk changed — regular files, hidden files, dotfiles, cache files, lock files, index files, database files, log files, files managed internally by other programs, metadata-only updates (timestamps/permissions), everything. **No category is excluded**, and **no hard-coded rubric, tool-name whitelist, or bash pattern matcher** is used in the hook. The LLM's semantic understanding is the entire decision.
+- **LLM-judged, project-aware file-change detection** — A headless `claude -p --model haiku` call is the **sole** judge of "did this turn modify any project file". It sees every tool invocation's full input and decides semantically.
 - **Per-session isolation** — State file keyed by `TERM_SESSION_ID`, so running multiple watchdogs in different terminal tabs never collide.
 - **Hidden by design** — All diagnostic output goes to stderr. The JSONL transcript never leaks loop metadata into the agent's context.
 - **Apache 2.0** — Cleanly derived from Anthropic's own `ralph-loop` plugin, with full attribution in [NOTICE](./NOTICE).
@@ -88,7 +88,7 @@ The loop exits when **both** of these are true for the latest assistant turn:
 | Check | Requirement |
 | --- | --- |
 | **Tool usage precondition** | The turn must have invoked at least one tool. Pure-text turns never exit. |
-| **Haiku classifier verdict** | A headless `claude -p --model haiku` call returns `NO_FILE_CHANGES`. The classifier reads the turn's `tool_use` blocks (tool name + raw Bash command text) and decides semantically whether **any** file on disk was modified, **across every category** — regular, hidden, cache, lock, index, internal, metadata-only edits — with no exclusion list. |
+| **Haiku classifier verdict** | A headless `claude -p --model haiku` call returns `NO_FILE_CHANGES`. The classifier reads every tool invocation's full input and decides semantically whether the turn directly modified any project file. |
 
 If either check fails, the loop continues. Additional exit paths:
 
@@ -270,15 +270,6 @@ The Haiku classifier is not infallible. A stuck agent that keeps making meaningl
 
 ---
 
-## Limitations & Known Issues
-
-- **Haiku cost per iteration** — Each Stop hook firing spends ~10 seconds and a small amount of tokens on a headless `claude -p --model haiku` call. This is the main latency cost of the loop.
-- **Two `claude` sessions in the same terminal tab** — They share `TERM_SESSION_ID` and will clobber each other's state file. Use separate tabs.
-- **Hook only fires on natural stops** — If a tool call crashes Claude Code itself, the state file may linger. Use `/watchdog:stop` to clean it up.
-- **Fail-safe direction is "continue"** — If the Haiku call fails (network, auth, parse error), the loop continues rather than exiting. Better to over-iterate than drop in-progress work.
-
----
-
 ## Plugin Layout
 
 This repo is both the marketplace and the plugin — `marketplace.json` points to `./`.
@@ -315,7 +306,7 @@ Watchdog keeps the core mechanic — a Stop hook that re-feeds the prompt — an
 
 | | Watchdog | ralph-loop |
 | --- | --- | --- |
-| **Exit trigger** | Headless Haiku classifier is the **only** judge. It reads the turn's tool calls (including raw Bash command text) and decides semantically whether **any** file on disk changed — universal scope, no category excluded. No rubric, no tool-name whitelist, no bash pattern matcher, no enumeration of "mutating" commands anywhere in the hook. | The agent must emit a `<promise>…</promise>` XML tag in its final text. The phrase inside the tags is configurable via `--completion-promise "…"` (e.g. `COMPLETE`, `DONE`). A Stop hook grep matches the exact string. |
+| **Exit trigger** | Headless Haiku classifier is the **sole** judge. It reads every tool invocation's full input and decides semantically whether any project file was directly modified. | The agent must emit a `<promise>…</promise>` XML tag in its final text. The phrase inside the tags is configurable via `--completion-promise "…"` (e.g. `COMPLETE`, `DONE`). A Stop hook grep matches the exact string. |
 | **Exit precondition** | Tools must have been called **AND** Haiku says `NO_FILE_CHANGES` | Just the `<promise>` text match. The agent can cheat by emitting the tag prematurely; ralph-loop's only defense is a prompt that asks the agent not to lie. |
 | **Agent visibility** | Completely hidden (no systemMessage, no banner, stderr-only diagnostics) | Agent is told about the loop and the promise protocol |
 | **State scoping** | Per-session file keyed by `TERM_SESSION_ID` | Project-scoped single state file |

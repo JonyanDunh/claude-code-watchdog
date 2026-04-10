@@ -84,11 +84,12 @@ if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
   exit 0
 fi
 
-# Exit the loop if this turn did not modify any files. Instead of hard-coding
-# which tool names count as mutations, we ask a headless Haiku instance to
-# judge whether any of the turn's tool invocations actually touched the
-# filesystem. This catches bash-based file writes (sed -i, >, mv, rm, etc.)
-# that a tool-name filter would miss.
+# Exit the loop if this turn did not modify any project files. Instead of
+# hard-coding which tool names count as mutations, we ask a headless Haiku
+# instance to judge semantically whether a file the developer would consider
+# part of the project was modified. Side effects that don't touch project
+# files — running containers, remote DB writes, network calls, system
+# daemon state — are correctly ignored because Haiku understands them.
 #
 # Per-session correct: the classifier only sees this session's transcript
 # lines (everything after the most recent user message line), so concurrent
@@ -113,18 +114,18 @@ set +e
 CURRENT_TURN_LINES=$(tail -n +$((LAST_USER_LINE + 1)) "$TRANSCRIPT_PATH" | grep '"role":"assistant"')
 set -e
 
-# Collect this turn's tool invocations as a compact JSON array. For Bash,
-# include the command string so the classifier can judge whether it writes
-# to the filesystem. For other tools, the tool name alone is enough. Empty
-# CURRENT_TURN_LINES is safe: jq -s on empty input yields "[]", which then
-# flows through to Haiku unchanged (Haiku will answer NO_FILE_CHANGES for
-# an empty invocation list).
+# Collect this turn's tool invocations as a compact JSON array. Every tool
+# gets BOTH its name AND its full input exposed to the classifier — Bash
+# (where command is inside input), MCP tools (where SQL / query / request
+# body lives in input), file tools (where file_path is in input), etc.
+# Without this, Haiku would see a bare "mcp__postgres__execute_sql" and
+# have no way to distinguish SELECT from INSERT. Empty CURRENT_TURN_LINES
+# is safe: jq -s on empty input yields "[]", which flows through to Haiku
+# unchanged.
 set +e
 TOOL_USES=$(echo "$CURRENT_TURN_LINES" | jq -s -c '
   [.[] | .message.content[]? | select(.type == "tool_use") |
-    if .name == "Bash" then {tool: "Bash", command: .input.command}
-    else {tool: .name}
-    end
+    {tool: .name, input: .input}
   ]
 ' 2>&1)
 JQ_EXIT=$?
@@ -138,28 +139,28 @@ if [[ $JQ_EXIT -ne 0 ]]; then
   exit 0
 fi
 
-# Ask a headless Haiku instance whether any of these invocations modified
-# files on disk. We trust Haiku's general knowledge of tool names and bash
-# commands — no hard-coded rubric, no enumeration of "mutating" commands.
-# Haiku reads the JSON (tool name + raw Bash command text where applicable)
-# and decides semantically. Distinctive marker tokens (FILE_CHANGES /
-# NO_FILE_CHANGES) make the classifier's output unambiguous and avoid
+# Ask a headless Haiku instance whether any of these invocations directly
+# modified a project file. Haiku sees every tool's full input — Bash
+# command text, MCP tool arguments (SQL queries, API request bodies,
+# etc.), Edit/Write file paths and content, everything — and decides
+# semantically. No hard-coded rubric, no tool-name whitelist, no bash
+# pattern matcher: the LLM's understanding of "what counts as a project
+# file" is the entire decision. Distinctive marker tokens
+# (FILE_CHANGES / NO_FILE_CHANGES) make the output unambiguous and avoid
 # false positives from natural-language prose.
 #
 # Falls through (continues the loop) on any failure as a safety default:
 # better to over-iterate than to drop in-progress work.
 JUDGMENT_PROMPT=$(cat <<PROMPT_EOF
-You are a binary classifier. Below is a JSON array of tool invocations from a single agent turn. Did ANY of them cause ANY on-disk change to ANY file?
+You are a binary classifier. Below is a JSON array of tool invocations from a single agent turn. Did any of them directly modify any project file?
 
-Scope is universal. EVERY file on disk counts equally, with no exceptions — regular files, hidden files, dotfiles, cache files, lock files, index files, database files, log files, config files, files managed internally by other programs, temporary files, and every other kind. There is no "internal" or "excluded" category of file. If any byte on the filesystem changes, it counts.
+A "project file" is any file a developer would consider part of their project: source code, tests, configuration, documentation, dotfiles, .git/* metadata, lock files, package manifests, etc. — essentially anything that belongs under version control, plus the .git internals that track it.
 
-Changes include but are not limited to: content edits, creation, deletion, rename, move, copy that produces a new file, append, truncate, and metadata updates such as timestamps, permissions, and ownership.
-
-When in doubt, err on the side of FILE_CHANGES.
+When in doubt, err on FILE_CHANGES.
 
 Output exactly one uppercase token with no other text:
-- FILE_CHANGES    if ANY file on disk changed in ANY way
-- NO_FILE_CHANGES if no file on disk changed at all
+- FILE_CHANGES    if at least one invocation directly modified a project file
+- NO_FILE_CHANGES if no project file was modified
 
 Tool invocations:
 $TOOL_USES
