@@ -23,69 +23,21 @@ MAX_ITERATIONS=0
 while [[ $# -gt 0 ]]; do
   case $1 in
     -h|--help)
-      cat << 'HELP_EOF'
-Watchdog - Interactive self-referential development loop
-
-USAGE:
-  /watchdog:start "PROMPT" [--max-iterations N]
-
-ARGUMENTS:
-  "PROMPT"    Initial prompt to start the loop. Wrap it in double quotes
-              so shell metacharacters (spaces, quotes, &, |, etc.) are
-              passed through as a single argument.
-
-OPTIONS:
-  --max-iterations <n>  Maximum iterations before auto-stop (default: unlimited)
-  -h, --help            Show this help message
-
-DESCRIPTION:
-  Starts a Watchdog in your CURRENT session. The stop hook prevents
-  exit and feeds the SAME PROMPT back to Claude until one of these
-  conditions is met:
-    • A headless Haiku classifier judges that the turn did not modify
-      any project file — considered converged
-    • --max-iterations is reached
-    • /watchdog:stop removes the state file
-
-  Use this for:
-  - Interactive iteration where you want to see progress
-  - Tasks requiring self-correction and refinement
-  - Learning how the watchdog works
-
-EXAMPLES:
-  # Fix failing tests, iterate until green
-  /watchdog:start "Fix the flaky auth tests in tests/auth/*.ts. Keep iterating until the whole suite passes with pnpm test:auth." --max-iterations 20
-
-  # Refactor with a verifiable end state
-  /watchdog:start "Refactor services/cache.ts to remove the legacy LRU implementation. Run pnpm typecheck && pnpm test:cache after each change. Iterate until both pass without warnings." --max-iterations 15
-
-  # Greenfield feature with clear acceptance criteria
-  /watchdog:start "Build a REST API for todos in src/api/todos.ts. Requirements: all CRUD endpoints, input validation, 80%+ coverage in tests/todos.test.ts, and all tests pass with pnpm test." --max-iterations 30
-
-  # Sweep a directory with a repetitive edit
-  /watchdog:start "Go through every file under src/utils/ and add JSDoc comments to all exported functions. Do not modify implementation logic." --max-iterations 20
-
-  # Type-error cleanup, iterate to zero
-  /watchdog:start "Find and fix all TypeScript errors reported by pnpm tsc --noEmit. Iterate until zero errors." --max-iterations 25
-
-  # Migration with a clear stopping point
-  /watchdog:start "Migrate all callers of legacy deprecated fooLegacy() in src/ to the new foo() API. Run pnpm lint && pnpm test after each batch. Stop when no callers of fooLegacy remain." --max-iterations 20
-
-STOPPING:
-  - Exits when the Haiku classifier judges a turn made no file changes
-  - Exits when --max-iterations is reached
-  - Exits when /watchdog:stop is run
-
-MONITORING:
-  # List all active per-session state files:
-  ls .claude/watchdog.*.local.json
-
-  # View current iteration for a specific session:
-  jq .iteration .claude/watchdog.<SESSION_ID>.local.json
-
-  # View full state:
-  jq . .claude/watchdog.<SESSION_ID>.local.json
-HELP_EOF
+      # Help is intentionally short and routed to stderr so the slash
+      # command's stdout stays empty — empty stdout means Claude Code
+      # does not feed a user turn to the agent, and the agent won't
+      # respond with a noisy "this is informational" acknowledgement.
+      # Full reference lives in commands/help.md, surfaced via
+      # /watchdog:help inside Claude Code.
+      {
+        echo "Watchdog — for the full reference, run inside Claude Code:"
+        echo ""
+        echo "    /watchdog:help"
+        echo ""
+        echo "Quick usage:"
+        echo "    /watchdog:start \"<your prompt>\" [--max-iterations N]"
+        echo "    /watchdog:stop"
+      } >&2
       exit 0
       ;;
     --max-iterations)

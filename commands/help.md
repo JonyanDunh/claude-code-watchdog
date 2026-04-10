@@ -4,116 +4,98 @@ description: "Explain Watchdog plugin and available commands"
 
 # Watchdog Plugin Help
 
-Please explain the following to the user:
+Please explain the following to the user in clear, friendly language. Do not dump the markdown verbatim — synthesize and present it.
 
-## What is the Watchdog?
+## What is Watchdog?
 
-The watchdog is an iterative development methodology based on continuous AI loops.
+Watchdog is a self-referential loop for Claude Code. You give it a prompt once, and it re-feeds that same prompt to Claude after every turn until the task genuinely stops producing file edits. The agent is not told a loop is running, so it cannot fake a completion signal to escape early.
 
-**Core concept:**
-```bash
-while :; do
-  cat PROMPT.md | claude-code --continue
-done
-```
+**Core mechanic:**
 
-The same prompt is fed to Claude repeatedly. The "self-referential" aspect comes from Claude seeing its own previous work in the files and git history, not from feeding output back as input.
+1. You run `/watchdog:start "<prompt>" [--max-iterations N]`
+2. Claude works on the task, modifying files
+3. Claude's turn ends — the Stop hook intercepts
+4. A headless Claude Haiku classifier inspects every tool invocation from that turn and decides: did any of them directly modify a project file?
+5. If yes → re-feed the original prompt as a new user turn, loop continues
+6. If no (or `--max-iterations` reached, or `/watchdog:stop` invoked) → exit cleanly
 
-**Each iteration:**
-1. Claude receives the SAME prompt
-2. Works on the task, modifying files
-3. Tries to exit
-4. Stop hook intercepts and feeds the same prompt again
-5. Claude sees its previous work in the files
-6. Iteratively improves until convergence
+The "self-reference" means each iteration sees the previous iteration's file edits and git state, so Claude builds on its own prior work without any external orchestrator.
 
-Failures across iterations are predictable, enabling systematic improvement through prompt tuning.
+## Why the Haiku classifier?
 
-## Available Commands
+Instead of a hard-coded tool-name whitelist (which misses `Bash(sed -i …)`, MCP SQL writes, and other indirect mutations), Watchdog asks a headless Haiku instance to read every tool invocation's full input and judge semantically whether a project file was modified. The verdict is a single token: `FILE_CHANGES` or `NO_FILE_CHANGES`. Side effects that don't touch project files — running containers, remote DB writes, network calls — are correctly ignored.
 
-### /start <PROMPT> [OPTIONS]
+## Available commands
 
-Start a watchdog in your current session.
+### `/watchdog:start "<PROMPT>" [--max-iterations N]`
+
+Start a Watchdog in the current session.
 
 **Usage:**
+
 ```
-/start "Refactor the cache layer" --max-iterations 20
-/start "Add tests"
+/watchdog:start "Refactor services/cache.ts to use the new API. Iterate until pnpm test:cache passes." --max-iterations 20
+/watchdog:start "Add tests for auth.ts until coverage hits 80%."
 ```
 
 **Options:**
-- `--max-iterations <n>` - Max iterations before auto-stop
 
-**How it works:**
-1. Creates `.claude/watchdog.<SESSION_ID>.local.json` state file (per-session, JSON)
-2. You work on the task
-3. When you try to exit, the stop hook intercepts
-4. Same prompt is fed back
-5. You see your previous work
-6. Continues until convergence or `--max-iterations`
+- `--max-iterations <n>` — safety cap, loop exits after N iterations no matter what. Recommended: 20.
 
----
+**Behavior:**
 
-### /stop
+1. Creates `.claude/watchdog.<TERM_SESSION_ID>.local.json` as the per-session state file
+2. Claude works on the task
+3. On turn end, the Stop hook runs the Haiku classifier
+4. If files were modified, the original prompt is re-fed as a new user turn
+5. Loop continues until convergence, max iterations, or `/watchdog:stop`
 
-Cancel an active watchdog (removes the loop state file).
+### `/watchdog:stop`
 
-**Usage:**
-```
-/stop
-```
+Cancel an active Watchdog in the current session. Removes the state file so the Stop hook stops re-feeding the prompt.
 
-**How it works:**
-- Checks for active loop state file
-- Removes `.claude/watchdog.<SESSION_ID>.local.json` for the current session
-- Reports cancellation with iteration count
+### `/watchdog:help`
 
----
+Show this reference.
 
-## Key Concepts
+## Exit conditions
 
-### Convergence Detection
+The loop exits when **any** of these is true:
 
-The stop hook exits the loop automatically when a turn completes **without any file-mutating tool calls** (`Edit` / `Write` / `NotebookEdit`). The idea: if Claude is no longer changing files, the task has converged.
-
-Exit conditions (any one triggers):
-- Turn finishes with zero Edit/Write/NotebookEdit calls
+- The Haiku classifier judges a turn made no project-file changes (convergence)
 - `--max-iterations` is reached
-- `/stop` is invoked
+- `/watchdog:stop` is invoked
+- The state file is manually removed
 
-### Self-Reference Mechanism
+A pure-text turn (no tool calls at all) never exits the loop — the agent must actually invoke tools, so it cannot claim completion from memory without doing real verification work.
 
-The "loop" doesn't mean Claude talks to itself. It means:
-- Same prompt repeated
-- Claude's work persists in files
-- Each iteration sees previous attempts
-- Builds incrementally toward the goal
+## Per-session isolation
 
-## Example
+The state file is keyed by `TERM_SESSION_ID` (the UUID your terminal emulator exports), so two Watchdogs running in two terminal tabs of the same repo do not collide.
 
-### Interactive Bug Fix
+## Prompt writing tips
 
-```
-/start "Fix the token refresh logic in auth.ts. Keep iterating until all tests pass." --max-iterations 10
-```
+- **Clear completion criteria** — "no more edits needed" must be a verifiable answer, not subjective. Tie it to passing tests, a clean typecheck, zero lint errors, etc.
+- **Incremental verifiable goals** — if there's no verifiable end state, the loop will just spin.
+- **Self-correcting structure** — tell Claude how to notice failure and adapt (e.g., "if any test fails, read the failure, fix, re-run").
+- **Always set `--max-iterations`** — even if the Haiku classifier is reliable, a stuck agent should fall through to a hard stop.
 
-You'll see the loop:
-- Attempt fixes (calling Edit/Write)
-- Run tests
-- See failures
-- Iterate on solutions
-- Exit automatically once Claude stops making further edits
-
-## When to Use the Watchdog
+## When to use Watchdog
 
 **Good for:**
-- Well-defined tasks with clear success criteria
-- Tasks requiring iteration and refinement
-- Iterative development with self-correction
-- Greenfield projects
+
+- Tasks with clear, automated success criteria (tests, lints, typechecks)
+- Iterative refinement loops
+- Greenfield implementations you can walk away from
+- Systematic code-review-with-fixes passes
 
 **Not good for:**
+
 - Tasks requiring human judgment or design decisions
-- One-shot operations
-- Tasks with unclear success criteria
-- Debugging production issues (use targeted debugging instead)
+- One-shot operations (a single command, a single file edit)
+- Anything where "done" is subjective
+- Production debugging that needs external context
+
+## Learn more
+
+Full documentation including install instructions, multi-language READMEs, and attribution to the upstream `ralph-loop` plugin: https://github.com/JonyanDunh/claude-code-watchdog
