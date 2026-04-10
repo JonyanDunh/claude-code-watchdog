@@ -295,9 +295,61 @@ Classifier Haiku không phải là thánh. Một agent bị kẹt mà cứ loay 
 | Yêu cầu | Lý do |
 | --- | --- |
 | **Claude Code 2.1+** | Dùng hệ thống Stop hook và định dạng plugin marketplace |
-| Biến môi trường **`TERM_SESSION_ID`** | Làm khoá cho file trạng thái theo session. Đa số terminal emulator (iTerm2, WezTerm, Windows Terminal, các terminal Linux hiện đại) đều tự set. Cách khắc phục nếu chưa có: `export TERM_SESSION_ID=$(uuidgen)` trước khi chạy `claude`. |
+| **`bash`** trong `PATH` | Toàn bộ logic của hook và setup đều viết bằng POSIX bash. Windows native (PowerShell / cmd) **không hỗ trợ** — xài WSL2 hoặc Git Bash |
 | **`jq`** trong `PATH` | Stop hook dùng để parse transcript JSONL và file trạng thái JSON |
 | **`claude` CLI** trong `PATH` | Dùng cho cú gọi phân loại Haiku headless. Phải đã xác thực (OAuth hoặc `ANTHROPIC_API_KEY`) |
+| Biến môi trường **`TERM_SESSION_ID`** | Làm khoá cho file trạng thái theo session. Đa số terminal emulator (iTerm2, WezTerm, các terminal Linux hiện đại) đều tự set. Cách khắc phục nếu chưa có: `export TERM_SESSION_ID=$(uuidgen)` trước khi chạy `claude`. |
+
+### Cài dependencies
+
+**macOS (Homebrew):**
+
+```bash
+brew install jq
+# bash đã có sẵn; muốn xài bash 5.x mới hơn: brew install bash
+# claude CLI: coi https://docs.anthropic.com/claude-code
+```
+
+**Debian / Ubuntu / WSL2:**
+
+```bash
+sudo apt update
+sudo apt install -y bash jq uuid-runtime
+# claude CLI: coi https://docs.anthropic.com/claude-code
+```
+
+**Fedora / RHEL:**
+
+```bash
+sudo dnf install -y bash jq util-linux
+```
+
+**Arch / Manjaro:**
+
+```bash
+sudo pacman -S --needed bash jq util-linux
+```
+
+**Windows:**
+
+Windows native (PowerShell / cmd) **không hỗ trợ** — plugin toàn bộ là bash scripts và phần đăng ký Stop hook bắt buộc phải có POSIX shell trong `PATH`. Bạn có hai lựa chọn:
+
+- **WSL2 (khuyến nghị)** — chạy Claude Code bên trong một distro WSL2. Mọi thứ chạy ngon lành luôn.
+- **Git Bash (thử nghiệm)** — cài [Git for Windows](https://git-scm.com/download/win) (nó gói sẵn bash), rồi cài thêm `jq` riêng (ví dụ qua [scoop](https://scoop.sh): `scoop install jq`). Bạn cũng sẽ phải tự tay export `TERM_SESSION_ID` trước khi chạy `claude`:
+  ```bash
+  export TERM_SESSION_ID=$(cat /proc/sys/kernel/random/uuid)
+  claude
+  ```
+
+### Hỗ trợ nền tảng
+
+| Nền tảng | Trạng thái |
+| --- | --- |
+| Linux | ✅ Đã test |
+| macOS | ✅ Chắc là chạy được (cùng POSIX primitives) |
+| WSL2 trên Windows | ✅ Đã test |
+| Git Bash trên Windows | ⚠️ Thử nghiệm, phải tự tay setup `TERM_SESSION_ID` |
+| Windows native (PowerShell / cmd) | ❌ Không hỗ trợ |
 
 ---
 

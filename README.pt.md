@@ -295,9 +295,61 @@ O classificador Haiku não é infalível. Um agente travado que fica fazendo edi
 | Requisito | Por quê |
 | --- | --- |
 | **`Claude Code` 2.1+** | Usa o sistema de Stop hook e o formato de plugin do marketplace |
-| **Variável de ambiente `TERM_SESSION_ID`** | Chave do arquivo de estado por sessão. A maioria dos emuladores de terminal define (iTerm2, WezTerm, Windows Terminal, terminais Linux modernos). Se não estiver setada: `export TERM_SESSION_ID=$(uuidgen)` antes de abrir o `claude`. |
+| **`bash`** no `PATH` | Toda a lógica de hook e setup é escrita em POSIX bash. Windows nativo (PowerShell / cmd) **não é suportado** — usa WSL2 ou Git Bash |
 | **`jq`** no `PATH` | Usado pelo Stop hook pra parsear o JSONL do transcript e o JSON do arquivo de estado |
 | **CLI `claude`** no `PATH` | Usada na chamada headless de classificação do Haiku. Precisa estar autenticada (OAuth ou `ANTHROPIC_API_KEY`) |
+| **Variável de ambiente `TERM_SESSION_ID`** | Chave do arquivo de estado por sessão. A maioria dos emuladores de terminal define (iTerm2, WezTerm, terminais Linux modernos). Se não estiver setada, dá um jeitinho: `export TERM_SESSION_ID=$(uuidgen)` antes de abrir o `claude`. |
+
+### Instalar dependências
+
+**macOS (Homebrew):**
+
+```bash
+brew install jq
+# bash já vem instalado; pra um bash 5.x mais novo: brew install bash
+# CLI claude: veja https://docs.anthropic.com/claude-code
+```
+
+**Debian / Ubuntu / WSL2:**
+
+```bash
+sudo apt update
+sudo apt install -y bash jq uuid-runtime
+# CLI claude: veja https://docs.anthropic.com/claude-code
+```
+
+**Fedora / RHEL:**
+
+```bash
+sudo dnf install -y bash jq util-linux
+```
+
+**Arch / Manjaro:**
+
+```bash
+sudo pacman -S --needed bash jq util-linux
+```
+
+**Windows:**
+
+Windows nativo (PowerShell / cmd) **não é suportado** — o plugin é puro bash e o registro do Stop hook depende de uma POSIX shell no `PATH`. Você tem duas opções:
+
+- **WSL2 (recomendado)** — roda o `Claude Code` dentro de uma distro WSL2. Funciona tudo de primeira.
+- **Git Bash (experimental)** — instala o [Git for Windows](https://git-scm.com/download/win), que já vem com bash, e depois instala o `jq` separado (por exemplo, via [scoop](https://scoop.sh): `scoop install jq`). Você também vai precisar exportar o `TERM_SESSION_ID` na mão antes de abrir o `claude`:
+  ```bash
+  export TERM_SESSION_ID=$(cat /proc/sys/kernel/random/uuid)
+  claude
+  ```
+
+### Suporte a plataformas
+
+| Plataforma | Status |
+| --- | --- |
+| Linux | ✅ Testado |
+| macOS | ✅ Deve funcionar (mesmos primitivos POSIX) |
+| WSL2 no Windows | ✅ Testado |
+| Git Bash no Windows | ⚠️ Experimental, precisa configurar `TERM_SESSION_ID` na mão |
+| Windows nativo (PowerShell / cmd) | ❌ Não suportado |
 
 ---
 

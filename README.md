@@ -295,9 +295,61 @@ The Haiku classifier is not infallible. A stuck agent that keeps making meaningl
 | Requirement | Why |
 | --- | --- |
 | **Claude Code 2.1+** | Uses the Stop hook system and marketplace plugin format |
-| **`TERM_SESSION_ID`** env var | Keys the per-session state file. Set by most terminal emulators (iTerm2, WezTerm, Windows Terminal, modern Linux terminals). Workaround if unset: `export TERM_SESSION_ID=$(uuidgen)` before launching `claude`. |
+| **`bash`** in `PATH` | All hook and setup logic is written in POSIX bash. Native Windows (PowerShell / cmd) is **not supported** — use WSL2 or Git Bash |
 | **`jq`** in `PATH` | Used by the Stop hook to parse transcript JSONL and state file JSON |
 | **`claude` CLI** in `PATH` | Used for the headless Haiku classification call. Must be authenticated (OAuth or `ANTHROPIC_API_KEY`) |
+| **`TERM_SESSION_ID`** env var | Keys the per-session state file. Set by most terminal emulators (iTerm2, WezTerm, modern Linux terminals). Workaround if unset: `export TERM_SESSION_ID=$(uuidgen)` before launching `claude`. |
+
+### Install dependencies
+
+**macOS (Homebrew):**
+
+```bash
+brew install jq
+# bash is already present; for newer bash 5.x: brew install bash
+# claude CLI: see https://docs.anthropic.com/claude-code
+```
+
+**Debian / Ubuntu / WSL2:**
+
+```bash
+sudo apt update
+sudo apt install -y bash jq uuid-runtime
+# claude CLI: see https://docs.anthropic.com/claude-code
+```
+
+**Fedora / RHEL:**
+
+```bash
+sudo dnf install -y bash jq util-linux
+```
+
+**Arch / Manjaro:**
+
+```bash
+sudo pacman -S --needed bash jq util-linux
+```
+
+**Windows:**
+
+Native Windows (PowerShell / cmd) is **not supported** — the plugin is entirely bash scripts and the Stop hook registration assumes a POSIX shell in `PATH`. Your two options:
+
+- **WSL2 (recommended)** — run Claude Code inside a WSL2 distro. Everything Just Works.
+- **Git Bash (experimental)** — install [Git for Windows](https://git-scm.com/download/win) which bundles bash, then install `jq` separately (e.g., via [scoop](https://scoop.sh): `scoop install jq`). You will also need to manually export `TERM_SESSION_ID` before launching `claude`:
+  ```bash
+  export TERM_SESSION_ID=$(cat /proc/sys/kernel/random/uuid)
+  claude
+  ```
+
+### Platform support
+
+| Platform | Status |
+| --- | --- |
+| Linux | ✅ Tested |
+| macOS | ✅ Expected to work (same POSIX primitives) |
+| WSL2 on Windows | ✅ Tested |
+| Git Bash on Windows | ⚠️ Experimental, requires manual `TERM_SESSION_ID` setup |
+| Native Windows (PowerShell / cmd) | ❌ Not supported |
 
 ---
 
