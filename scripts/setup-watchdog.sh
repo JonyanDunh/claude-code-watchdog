@@ -88,7 +88,7 @@ if [[ -z "$PROMPT" ]]; then
   echo '     /watchdog:start "Fix the auth bug" --max-iterations 20' >&2
   echo '     /watchdog:start "Refactor the cache layer" --max-iterations 20' >&2
   echo "" >&2
-  echo "   For all options: /watchdog:start --help" >&2
+  echo "   For the full reference: /watchdog:help" >&2
   exit 1
 fi
 
