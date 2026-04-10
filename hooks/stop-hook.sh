@@ -12,8 +12,10 @@
 # replaced the <promise> XML-tag exit protocol with a headless Haiku
 # classifier, added a "must have called tools" exit precondition,
 # hid the loop from the agent (no systemMessage, stderr-only diagnostics),
-# switched state file to per-session JSON keyed by TERM_SESSION_ID, and
-# fixed a transcript turn-boundary bug involving tool_result entries.
+# switched state file to per-session JSON keyed by TERM_SESSION_ID,
+# fixed a transcript turn-boundary bug involving tool_result entries,
+# and added an owner_session_id recursion guard so the headless Haiku
+# classifier's own Stop hook does not clobber the main session's state.
 # See the NOTICE file at the repo root for a full summary of changes.
 
 set -euo pipefail
@@ -38,6 +40,31 @@ WATCHDOG_STATE_FILE=".claude/watchdog.${TERM_SESSION_ID}.local.json"
 
 if [[ ! -f "$WATCHDOG_STATE_FILE" ]]; then
   # No active loop for this session - allow exit.
+  exit 0
+fi
+
+# Recursion guard. The headless Haiku classifier we invoke below is itself a
+# full Claude Code session, so when it ends its own Stop hook fires. The
+# state file path is keyed by TERM_SESSION_ID — which is a terminal-emulator
+# env var and IS inherited by subprocesses — so the recursive invocation
+# would find and clobber the main session's state file.
+#
+# Fix: the per-invocation Claude `session_id` (from the hook's stdin JSON) is
+# NOT inherited — every Claude Code process gets its own. On the first fire
+# we stamp it into the state file as owner_session_id; subsequent fires
+# compare and bail out if they're from a different session.
+HOOK_SESSION_ID=$(echo "$HOOK_INPUT" | jq -r '.session_id // empty')
+OWNER_SESSION_ID=$(jq -r '.owner_session_id // empty' "$WATCHDOG_STATE_FILE" 2>/dev/null)
+
+if [[ -z "$OWNER_SESSION_ID" ]]; then
+  # First fire — claim ownership atomically (tmp file + rename).
+  TEMP_FILE="${WATCHDOG_STATE_FILE}.tmp.$$"
+  jq --arg sid "$HOOK_SESSION_ID" '.owner_session_id = $sid' "$WATCHDOG_STATE_FILE" > "$TEMP_FILE"
+  mv "$TEMP_FILE" "$WATCHDOG_STATE_FILE"
+elif [[ "$OWNER_SESSION_ID" != "$HOOK_SESSION_ID" ]]; then
+  # Recursive invocation from a subprocess (e.g. the headless Haiku
+  # classifier we spawn below). Do nothing so we don't touch the main
+  # session's state.
   exit 0
 fi
 
@@ -91,14 +118,10 @@ fi
 # files — running containers, remote DB writes, network calls, system
 # daemon state — are correctly ignored because Haiku understands them.
 #
-# Per-session correct: the classifier only sees this session's transcript
-# lines (everything after the most recent user message line), so concurrent
-# sessions in the same working tree do not cross-contaminate each other.
+# Recursion protection is handled by the owner_session_id check near the top
+# of this script — the headless Haiku session's recursive Stop hook sees a
+# mismatched owner_session_id and bails before ever reaching this point.
 #
-# Recursion protection: Haiku's own Stop hook will still fire at the end of
-# the judge call, but the session_id isolation check near the top of this
-# script short-circuits it (the judge session's id will not match the state
-# file's session_id), so there is no infinite loop.
 # Find the line number of the most recent *real* user message (a user-initiated
 # turn boundary), ignoring tool_result entries. Claude Code writes tool
 # results back to the transcript with role="user", so a naive
