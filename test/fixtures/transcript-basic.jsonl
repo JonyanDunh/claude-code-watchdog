@@ -1,0 +1,7 @@
+{"type":"summary","summary":"earlier context"}
+{"type":"user","message":{"role":"user","content":"Create tmp/foo.md with hello world"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll create the file."},{"type":"tool_use","id":"tu_1","name":"Write","input":{"file_path":"/tmp/foo.md","content":"hello world\n"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"File created"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
+{"type":"user","message":{"role":"user","content":"Now add one more line"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_2","name":"Edit","input":{"file_path":"/tmp/foo.md","old_string":"hello world","new_string":"hello world\nsecond line"}},{"type":"tool_use","id":"tu_3","name":"Bash","input":{"command":"ls /tmp/foo.md","description":"verify exists"}}]}}

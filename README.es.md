@@ -292,64 +292,71 @@ El clasificador Haiku no es infalible. Un agent atascado que no para de hacer ed
 
 ## Requisitos
 
+Watchdog 1.1.0 es una **reescritura en Node.js**. Nada de bash, nada de jq, nada de POSIX coreutils — solo necesitas `node` y el `claude` CLI. Corre de forma nativa en Linux, macOS y Windows.
+
 | Requisito | Por qué |
 | --- | --- |
 | **Claude Code 2.1+** | Usa el sistema de `Stop hook` y el formato de plugin del marketplace |
-| **`bash`** en el `PATH` | Toda la lógica de los hooks y del setup está escrita en bash POSIX. Windows nativo (PowerShell / cmd) **no está soportado** — usa WSL2 o Git Bash |
-| **`jq`** en el `PATH` | Lo usa el `Stop hook` para parsear el JSONL del transcript y el JSON del archivo de estado |
+| **`node`** 18+ en el `PATH` | Toda la lógica de los hooks y del setup está escrita en JavaScript. `node:test` (que usa la suite de tests) requiere Node 18+ |
 | **`claude` CLI** en el `PATH` | Se usa para la llamada headless de clasificación con Haiku. Tiene que estar autenticado (OAuth o `ANTHROPIC_API_KEY`) |
-| Variable de entorno **`TERM_SESSION_ID`** | Indexa el archivo de estado por sesión. La definen la mayoría de emuladores de terminal (iTerm2, WezTerm, terminales modernas de Linux). Workaround si no está definida: `export TERM_SESSION_ID=$(uuidgen)` antes de lanzar `claude`. |
+| Variable de entorno **`TERM_SESSION_ID`** | Indexa el archivo de estado por sesión. La definen la mayoría de emuladores de terminal (iTerm2, WezTerm, terminales modernas de Linux). Workaround si no está definida: `export TERM_SESSION_ID=$(node -e "console.log(require('crypto').randomUUID())")` antes de lanzar `claude`. |
 
 ### Instalar dependencias
+
+Si instalaste Claude Code vía `npm install -g @anthropic-ai/claude-code`, ya tienes `node` en el `PATH` y no hace falta instalar nada más. Si no:
 
 **macOS (Homebrew):**
 
 ```bash
-brew install jq
-# bash ya viene incluido; para un bash 5.x más nuevo: brew install bash
+brew install node
 # claude CLI: mira https://docs.anthropic.com/claude-code
 ```
 
 **Debian / Ubuntu / WSL2:**
 
 ```bash
-sudo apt update
-sudo apt install -y bash jq uuid-runtime
-# claude CLI: mira https://docs.anthropic.com/claude-code
+# Opción 1: paquete de la distro (puede ser anterior a la 18)
+sudo apt update && sudo apt install -y nodejs
+
+# Opción 2: NodeSource (LTS actual)
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt install -y nodejs
 ```
 
 **Fedora / RHEL:**
 
 ```bash
-sudo dnf install -y bash jq util-linux
+sudo dnf install -y nodejs
 ```
 
 **Arch / Manjaro:**
 
 ```bash
-sudo pacman -S --needed bash jq util-linux
+sudo pacman -S --needed nodejs
 ```
 
-**Windows:**
+**Windows (PowerShell / cmd nativo):**
 
-Windows nativo (PowerShell / cmd) **no está soportado** — el plugin es puro bash y el registro del `Stop hook` asume una shell POSIX en el `PATH`. Tienes dos opciones:
+```powershell
+# winget
+winget install OpenJS.NodeJS.LTS
 
-- **WSL2 (recomendado)** — ejecuta Claude Code dentro de una distro WSL2. Todo funciona sin tocar nada.
-- **Git Bash (experimental)** — instala [Git para Windows](https://git-scm.com/download/win), que trae bash, y luego instala `jq` aparte (por ejemplo, vía [scoop](https://scoop.sh): `scoop install jq`). También vas a tener que exportar `TERM_SESSION_ID` a mano antes de lanzar `claude`:
-  ```bash
-  export TERM_SESSION_ID=$(cat /proc/sys/kernel/random/uuid)
-  claude
-  ```
+# o scoop
+scoop install nodejs-lts
+
+# o bájate el instalador desde https://nodejs.org
+```
+
+No hace falta WSL2 ni Git Bash — Watchdog 1.1.0 corre directo en Windows nativo.
 
 ### Soporte de plataformas
 
 | Plataforma | Estado |
 | --- | --- |
-| Linux | ✅ Probado |
-| macOS | ✅ Debería funcionar (mismos primitivos POSIX) |
-| WSL2 en Windows | ✅ Probado |
-| Git Bash en Windows | ⚠️ Experimental, requiere configurar `TERM_SESSION_ID` a mano |
-| Windows nativo (PowerShell / cmd) | ❌ No soportado |
+| Linux (Node 18 / 20 / 22) | ✅ Probado en CI |
+| macOS (Node 18 / 20 / 22) | ✅ Probado en CI |
+| Windows (Node 18 / 20 / 22) | ✅ Probado en CI (PowerShell / cmd nativo, sin WSL2) |
+| WSL2 en Windows | ✅ Funciona (es Linux) |
 
 ---
 
@@ -367,17 +374,57 @@ claude-code-watchdog/
 │   ├── stop.md              # /watchdog:stop
 │   └── help.md              # /watchdog:help
 ├── hooks/
-│   ├── hooks.json           # registra el Stop hook
-│   └── stop-hook.sh         # la lógica central del bucle
+│   ├── hooks.json           # registra el Stop hook (invoca node)
+│   └── stop-hook.js         # la lógica central del bucle
 ├── scripts/
-│   ├── setup-watchdog.sh    # crea el archivo de estado
-│   └── stop-watchdog.sh     # elimina el archivo de estado
-├── .gitattributes           # fuerza los finales de línea LF (crítico para scripts de shell)
+│   ├── setup-watchdog.js    # crea el archivo de estado
+│   └── stop-watchdog.js     # elimina el archivo de estado
+├── lib/                     # módulos compartidos (reutilizados por todos los entry points)
+│   ├── constants.js         # patrón del path del estado, tokens marcadores, plantillas de prompt
+│   ├── log.js               # diagnósticos por stderr
+│   ├── stdin.js             # lector síncrono de stdin cross-platform
+│   ├── state.js             # ciclo de vida atómico del archivo de estado
+│   ├── transcript.js        # parser JSONL + extracción de herramientas del turno actual
+│   └── judge.js             # subproceso headless de Haiku + parser del veredicto
+├── test/                    # tests unitarios + de integración con node:test
+│   ├── fixtures/            # fixtures JSONL de transcripts
+│   ├── transcript.test.js
+│   ├── state.test.js
+│   ├── judge.test.js
+│   ├── setup.test.js
+│   ├── stop-watchdog.test.js
+│   └── stop-hook.test.js
+├── .github/                 # workflow de CI (matriz node --test, jsonlint, markdownlint) + plantillas de issue/PR
+├── .gitattributes           # fuerza los finales de línea LF
 ├── LICENSE                  # Apache License 2.0
 ├── NOTICE                   # atribución a ralph-loop
 ├── README.md                # este archivo
-└── README.zh.md             # traducción al chino
+└── README.{zh,ja,ko,es,vi,pt}.md  # traducciones
 ```
+
+## Tests
+
+Watchdog 1.1.0 viene con 53 tests automatizados usando el runner `node:test` integrado de Node — sin dependencias externas. Lánzalos desde la raíz del repo.
+
+**Node 22+:**
+
+```bash
+node --test 'test/*.test.js'
+```
+
+**Node 18 / 20** (el soporte de globs se añadió en Node 21, así que o dejas que tu shell expanda el patrón, o listas los archivos a mano):
+
+```bash
+node --test test/*.test.js
+```
+
+Ejecuta solo un archivo:
+
+```bash
+node --test test/transcript.test.js
+```
+
+El CI corre la suite completa en `ubuntu-latest`, `macos-latest` y `windows-latest` con Node 18 / 20 / 22 en cada push y pull request.
 
 ---
 
@@ -393,7 +440,8 @@ Watchdog mantiene el mecanismo central — un `Stop hook` que vuelve a inyectar 
 | **Precondición de salida** | Hay que haber llamado a herramientas **Y** que Haiku diga `NO_FILE_CHANGES` | Basta con que coincida el texto del `<promise>`. El agent puede hacer trampa emitiendo la etiqueta antes de tiempo; la única defensa de ralph-loop es un prompt que le pide al agent que no mienta. |
 | **Visibilidad para el agent** | Completamente oculto (sin systemMessage, sin banner, diagnósticos solo por stderr) | Al agent se le informa del bucle y del protocolo del promise |
 | **Ámbito del estado** | Archivo por sesión, indexado por `TERM_SESSION_ID` | Archivo único de estado a nivel de proyecto |
-| **Formato del archivo de estado** | JSON (parseado con jq) | Markdown con frontmatter YAML (parseado con sed/awk/grep) |
+| **Formato del archivo de estado** | JSON (parseado con `JSON.parse` nativo) | Markdown con frontmatter YAML (parseado con sed/awk/grep) |
+| **Runtime** | Node.js 18+ — cross-platform (Linux, macOS, Windows nativo) | Bash + jq + POSIX coreutils — solo Unix |
 
 Ver [`NOTICE`](./NOTICE) para la atribución completa y el listado detallado de modificaciones.
 

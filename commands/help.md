@@ -10,6 +10,8 @@ Please explain the following to the user in clear, friendly language. Do not dum
 
 Watchdog is a self-referential loop for Claude Code. You give it a prompt once, and it re-feeds that same prompt to Claude after every turn until the task genuinely stops producing file edits. The agent is not told a loop is running, so it cannot fake a completion signal to escape early.
 
+**This is the 1.1.0 Node.js rewrite** — no bash, no jq, no POSIX dependencies. Runs natively on Linux, macOS, and Windows, with `node` as the only runtime requirement.
+
 **Core mechanic:**
 
 1. You run `/watchdog:start "<prompt>" [--max-iterations N]`
@@ -73,29 +75,24 @@ A pure-text turn (no tool calls at all) never exits the loop — the agent must 
 
 The state file is keyed by `TERM_SESSION_ID` (the UUID your terminal emulator exports), so two Watchdogs running in two terminal tabs of the same repo do not collide.
 
+## Requirements (1.1.0)
+
+| Requirement | Why |
+| --- | --- |
+| **Claude Code 2.1+** | Uses the Stop hook system and marketplace plugin format |
+| **`node`** in `PATH` | All hook and setup logic is JavaScript, runs on Node 18+. Built-in `--test` runner is used for the test suite. |
+| **`claude` CLI** in `PATH` | Used for the headless Haiku classification call. Must be authenticated. |
+| **`TERM_SESSION_ID`** env var | Keys the per-session state file. If your terminal doesn't export one, run `export TERM_SESSION_ID=$(node -e "console.log(require('crypto').randomUUID())")` before launching `claude`. |
+
+**No bash. No jq.** This version runs natively on Windows PowerShell / cmd.
+
 ## Prompt writing tips
 
 - **Clear completion criteria** — "no more edits needed" must be a verifiable answer, not subjective. Tie it to passing tests, a clean typecheck, zero lint errors, etc.
 - **Incremental verifiable goals** — if there's no verifiable end state, the loop will just spin.
-- **Self-correcting structure** — tell Claude how to notice failure and adapt (e.g., "if any test fails, read the failure, fix, re-run").
+- **Self-correcting structure** — tell Claude how to notice failure and adapt.
 - **Always set `--max-iterations`** — even if the Haiku classifier is reliable, a stuck agent should fall through to a hard stop.
-
-## When to use Watchdog
-
-**Good for:**
-
-- Tasks with clear, automated success criteria (tests, lints, typechecks)
-- Iterative refinement loops
-- Greenfield implementations you can walk away from
-- Systematic code-review-with-fixes passes
-
-**Not good for:**
-
-- Tasks requiring human judgment or design decisions
-- One-shot operations (a single command, a single file edit)
-- Anything where "done" is subjective
-- Production debugging that needs external context
 
 ## Learn more
 
-Full documentation including install instructions, multi-language READMEs, and attribution to the upstream `ralph-loop` plugin: https://github.com/JonyanDunh/claude-code-watchdog
+Full documentation and translations in 7 languages: https://github.com/JonyanDunh/claude-code-watchdog

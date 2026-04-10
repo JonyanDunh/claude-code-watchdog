@@ -1,10 +1,10 @@
 ---
 description: "Start Watchdog in current session"
 argument-hint: "PROMPT [--max-iterations N]"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-watchdog.sh:*)"]
+allowed-tools: ["Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/setup-watchdog.js:*)"]
 hide-from-slash-command-tool: "true"
 ---
 
 ```!
-"${CLAUDE_PLUGIN_ROOT}/scripts/setup-watchdog.sh" $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/setup-watchdog.js" $ARGUMENTS
 ```

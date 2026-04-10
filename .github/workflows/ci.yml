@@ -10,39 +10,59 @@ permissions:
   contents: read
 
 jobs:
-  shellcheck:
-    name: ShellCheck shell scripts
-    runs-on: ubuntu-latest
+  nodejs-tests:
+    name: Node.js tests (${{ matrix.os }}, node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['18', '20', '22']
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Run shellcheck
-        uses: ludeeus/action-shellcheck@master
+      - name: Use Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
         with:
-          scandir: "."
-          severity: warning
-        env:
-          SHELLCHECK_OPTS: -e SC2317
+          node-version: ${{ matrix.node }}
+      - name: Syntax-check all JavaScript files
+        shell: bash
+        run: |
+          set -e
+          find . -type f -name '*.js' ! -path './.git/*' -print0 | while IFS= read -r -d '' f; do
+            node --check "$f"
+          done
+      - name: Run the test suite
+        shell: bash
+        # Explicit file list — Node's --test glob support only landed in
+        # v21+. Listing files keeps CI working on Node 18 and 20 (which
+        # treat 'test/*.test.js' as a literal path).
+        run: |
+          node --test \
+            test/transcript.test.js \
+            test/state.test.js \
+            test/judge.test.js \
+            test/setup.test.js \
+            test/stop-watchdog.test.js \
+            test/stop-hook.test.js
 
   jsonlint:
     name: Lint JSON manifests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-      - name: Validate all JSON files
+      - name: Validate all JSON files with Node
         run: |
           set -e
           fail=0
           while IFS= read -r f; do
-            if ! jq empty "$f" 2>/tmp/jq-err; then
+            if ! node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$f" 2>/tmp/json-err; then
               echo "::error file=$f::Invalid JSON"
-              cat /tmp/jq-err
+              cat /tmp/json-err
               fail=1
             else
               echo "ok: $f"
             fi
-          done < <(find . -type f -name '*.json' ! -path './.git/*')
+          done < <(find . -type f -name '*.json' ! -path './.git/*' ! -path './node_modules/*')
           exit $fail
 
   markdownlint:
