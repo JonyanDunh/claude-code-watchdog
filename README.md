@@ -4,7 +4,7 @@ English | [中文](./README.zh.md) | [한국어](./README.ko.md) | [日本語](.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1%2B-7C4DFF.svg)](https://docs.anthropic.com/claude-code)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](./.claude-plugin/plugin.json)
 [![GitHub stars](https://img.shields.io/github/stars/JonyanDunh/claude-code-watchdog?style=flat&color=yellow)](https://github.com/JonyanDunh/claude-code-watchdog/stargazers)
 [![Inspired by ralph-loop](https://img.shields.io/badge/Inspired%20by-ralph--loop-orange.svg)](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop)
 
@@ -84,7 +84,7 @@ You run the command **once**, then Claude Code handles the rest:
 #    (or --max-iterations is reached)
 ```
 
-The loop happens **inside your current session** — no external `while true`, no orchestrator process. The Stop hook in `hooks/stop-hook.sh` blocks normal session exit and re-injects the prompt as a new user turn using Claude Code's native `{"decision": "block", "reason": ...}` protocol.
+The loop happens **inside your current session** — no external `while true`, no orchestrator process. The Stop hook in `hooks/stop-hook.js` blocks normal session exit and re-injects the prompt as a new user turn using Claude Code's native `{"decision": "block", "reason": ...}` protocol.
 
 This creates a **self-referential feedback loop** where:
 - The prompt never changes between iterations
