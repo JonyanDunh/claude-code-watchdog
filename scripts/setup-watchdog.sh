@@ -27,10 +27,12 @@ while [[ $# -gt 0 ]]; do
 Watchdog - Interactive self-referential development loop
 
 USAGE:
-  /start [PROMPT...] [OPTIONS]
+  /watchdog:start "PROMPT" [--max-iterations N]
 
 ARGUMENTS:
-  PROMPT...    Initial prompt to start the loop (can be multiple words without quotes)
+  "PROMPT"    Initial prompt to start the loop. Wrap it in double quotes
+              so shell metacharacters (spaces, quotes, &, |, etc.) are
+              passed through as a single argument.
 
 OPTIONS:
   --max-iterations <n>  Maximum iterations before auto-stop (default: unlimited)
@@ -40,10 +42,10 @@ DESCRIPTION:
   Starts a Watchdog in your CURRENT session. The stop hook prevents
   exit and feeds the SAME PROMPT back to Claude until one of these
   conditions is met:
-    • Claude finishes a turn without any file-mutating tool calls
-      (Edit / Write / NotebookEdit) — considered converged
+    • A headless Haiku classifier judges that the turn did not modify
+      any project file — considered converged
     • --max-iterations is reached
-    • /stop removes the state file
+    • /watchdog:stop removes the state file
 
   Use this for:
   - Interactive iteration where you want to see progress
@@ -51,14 +53,28 @@ DESCRIPTION:
   - Learning how the watchdog works
 
 EXAMPLES:
-  /start Build a todo API --max-iterations 20
-  /start --max-iterations 10 Fix the auth bug
-  /start Refactor cache layer  (runs until Claude stops changing files)
+  # Fix failing tests, iterate until green
+  /watchdog:start "Fix the flaky auth tests in tests/auth/*.ts. Keep iterating until the whole suite passes with pnpm test:auth." --max-iterations 20
+
+  # Refactor with a verifiable end state
+  /watchdog:start "Refactor services/cache.ts to remove the legacy LRU implementation. Run pnpm typecheck && pnpm test:cache after each change. Iterate until both pass without warnings." --max-iterations 15
+
+  # Greenfield feature with clear acceptance criteria
+  /watchdog:start "Build a REST API for todos in src/api/todos.ts. Requirements: all CRUD endpoints, input validation, 80%+ coverage in tests/todos.test.ts, and all tests pass with pnpm test." --max-iterations 30
+
+  # Sweep a directory with a repetitive edit
+  /watchdog:start "Go through every file under src/utils/ and add JSDoc comments to all exported functions. Do not modify implementation logic." --max-iterations 20
+
+  # Type-error cleanup, iterate to zero
+  /watchdog:start "Find and fix all TypeScript errors reported by pnpm tsc --noEmit. Iterate until zero errors." --max-iterations 25
+
+  # Migration with a clear stopping point
+  /watchdog:start "Migrate all callers of legacy deprecated fooLegacy() in src/ to the new foo() API. Run pnpm lint && pnpm test after each batch. Stop when no callers of fooLegacy remain." --max-iterations 20
 
 STOPPING:
-  - Exits when a turn finishes with no Edit/Write/NotebookEdit tool calls
+  - Exits when the Haiku classifier judges a turn made no file changes
   - Exits when --max-iterations is reached
-  - Exits when /stop is run
+  - Exits when /watchdog:stop is run
 
 MONITORING:
   # List all active per-session state files:
@@ -116,11 +132,11 @@ if [[ -z "$PROMPT" ]]; then
   echo "   Watchdog needs a task description to work on." >&2
   echo "" >&2
   echo "   Examples:" >&2
-  echo "     /start Build a REST API for todos" >&2
-  echo "     /start Fix the auth bug --max-iterations 20" >&2
-  echo "     /start Refactor code --max-iterations 20" >&2
+  echo '     /watchdog:start "Build a REST API for todos"' >&2
+  echo '     /watchdog:start "Fix the auth bug" --max-iterations 20' >&2
+  echo '     /watchdog:start "Refactor the cache layer" --max-iterations 20' >&2
   echo "" >&2
-  echo "   For all options: /start --help" >&2
+  echo "   For all options: /watchdog:start --help" >&2
   exit 1
 fi
 
