@@ -404,7 +404,7 @@ claude-code-watchdog/
 
 ## 测试
 
-Watchdog 1.1.0 自带 53 个自动化测试，全部基于 Node 原生的 `node:test` runner —— 零外部依赖。在仓库根目录跑。
+Watchdog 1.1.0 自带 59 个自动化测试，全部基于 Node 原生的 `node:test` runner —— 零外部依赖。在仓库根目录跑。
 
 **Node 22+：**
 

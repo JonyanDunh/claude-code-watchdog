@@ -404,7 +404,7 @@ claude-code-watchdog/
 
 ## Testes
 
-O Watchdog 1.1.0 vem com 53 testes automatizados usando o runner nativo `node:test` — sem dependências externas. Roda eles na raiz do repo.
+O Watchdog 1.1.0 vem com 59 testes automatizados usando o runner nativo `node:test` — sem dependências externas. Roda eles na raiz do repo.
 
 **Node 22+:**
 

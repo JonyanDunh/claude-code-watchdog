@@ -404,7 +404,7 @@ claude-code-watchdog/
 
 ## Testing
 
-Watchdog 1.1.0 ships with 53 automated tests using Node's built-in `node:test` runner — no external dependencies. Run them from the repo root.
+Watchdog 1.1.0 ships with 59 automated tests using Node's built-in `node:test` runner — no external dependencies. The suite includes a mock-Claude-CLI integration test that exercises the **real** `spawnSync('claude', ...)` subprocess path (with a cross-platform POSIX + Windows `.cmd` wrapper on `PATH`), so the headless Haiku classifier code is covered across all verdict branches on Linux, macOS, **and** Windows. Run them from the repo root.
 
 **Node 22+:**
 
