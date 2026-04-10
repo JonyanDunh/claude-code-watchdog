@@ -4,7 +4,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1%2B-7C4DFF.svg)](https://docs.anthropic.com/claude-code)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](./.claude-plugin/plugin.json)
 [![GitHub stars](https://img.shields.io/github/stars/JonyanDunh/claude-code-watchdog?style=flat&color=yellow)](https://github.com/JonyanDunh/claude-code-watchdog/stargazers)
 [![Inspired by ralph-loop](https://img.shields.io/badge/Inspired%20by-ralph--loop-orange.svg)](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop)
 
@@ -84,7 +84,7 @@ Bạn chỉ chạy lệnh **một lần**, phần còn lại Claude Code lo:
 #    (hoặc khi chạm --max-iterations)
 ```
 
-Vòng lặp diễn ra **ngay trong session hiện tại** — không có `while true` bên ngoài, không có tiến trình orchestrator nào cả. Stop hook trong `hooks/stop-hook.sh` chặn cú thoát session bình thường và nhét lại prompt dưới dạng một user turn mới bằng giao thức gốc của Claude Code: `{"decision": "block", "reason": ...}`.
+Vòng lặp diễn ra **ngay trong session hiện tại** — không có `while true` bên ngoài, không có tiến trình orchestrator nào cả. Stop hook trong `hooks/stop-hook.js` chặn cú thoát session bình thường và nhét lại prompt dưới dạng một user turn mới bằng giao thức gốc của Claude Code: `{"decision": "block", "reason": ...}`.
 
 Cái này tạo ra một **vòng lặp phản hồi tự tham chiếu**, trong đó:
 - Prompt không bao giờ đổi giữa các iteration

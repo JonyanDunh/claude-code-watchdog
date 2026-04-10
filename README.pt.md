@@ -4,7 +4,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1%2B-7C4DFF.svg)](https://docs.anthropic.com/claude-code)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](./.claude-plugin/plugin.json)
 [![GitHub stars](https://img.shields.io/github/stars/JonyanDunh/claude-code-watchdog?style=flat&color=yellow)](https://github.com/JonyanDunh/claude-code-watchdog/stargazers)
 [![Inspired by ralph-loop](https://img.shields.io/badge/Inspired%20by-ralph--loop-orange.svg)](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop)
 
@@ -84,7 +84,7 @@ Você roda o comando **uma vez** e o `Claude Code` cuida do resto:
 #    (ou até bater em --max-iterations)
 ```
 
-O loop acontece **dentro da sua sessão atual** — nada de `while true` externo, nada de processo orquestrador. O Stop hook em `hooks/stop-hook.sh` bloqueia a saída normal da sessão e reinjeta o prompt como um novo turno de usuário usando o protocolo nativo do `Claude Code`: `{"decision": "block", "reason": ...}`.
+O loop acontece **dentro da sua sessão atual** — nada de `while true` externo, nada de processo orquestrador. O Stop hook em `hooks/stop-hook.js` bloqueia a saída normal da sessão e reinjeta o prompt como um novo turno de usuário usando o protocolo nativo do `Claude Code`: `{"decision": "block", "reason": ...}`.
 
 Isso monta um **loop de feedback auto-referencial** onde:
 - O prompt nunca muda entre iterações

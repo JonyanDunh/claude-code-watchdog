@@ -4,7 +4,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1%2B-7C4DFF.svg)](https://docs.anthropic.com/claude-code)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](./.claude-plugin/plugin.json)
 [![GitHub stars](https://img.shields.io/github/stars/JonyanDunh/claude-code-watchdog?style=flat&color=yellow)](https://github.com/JonyanDunh/claude-code-watchdog/stargazers)
 [![Inspired by ralph-loop](https://img.shields.io/badge/Inspired%20by-ralph--loop-orange.svg)](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop)
 
@@ -84,7 +84,7 @@ _`Claude Code` 플러그인입니다. 하나의 세션 안에서 현재 agent를
 #    (또는 --max-iterations에 도달할 때까지)
 ```
 
-이 루프는 **현재 세션 내부에서** 돌아갑니다. 외부 `while true`도, 오케스트레이터 프로세스도 없습니다. `hooks/stop-hook.sh`의 `Stop hook`이 일반적인 세션 종료를 막고, `Claude Code`의 네이티브 `{"decision": "block", "reason": ...}` 프로토콜을 이용해 prompt를 새로운 user turn으로 다시 주입합니다.
+이 루프는 **현재 세션 내부에서** 돌아갑니다. 외부 `while true`도, 오케스트레이터 프로세스도 없습니다. `hooks/stop-hook.js`의 `Stop hook`이 일반적인 세션 종료를 막고, `Claude Code`의 네이티브 `{"decision": "block", "reason": ...}` 프로토콜을 이용해 prompt를 새로운 user turn으로 다시 주입합니다.
 
 이를 통해 **자기 참조 피드백 루프**가 만들어집니다.
 
