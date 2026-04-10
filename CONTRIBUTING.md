@@ -81,7 +81,7 @@ Common types:
 
 ## Testing your change
 
-Watchdog ships with 53 automated tests using Node's built-in `node:test` runner — no external test dependencies. Run them from the repo root:
+Watchdog ships with 59 automated tests using Node's built-in `node:test` runner — no external test dependencies. Run them from the repo root:
 
 ```bash
 # Node 22+: glob pattern
@@ -104,7 +104,8 @@ The suite covers:
 - **`test/judge.test.js`** — verdict parser (FILE_CHANGES substring trap, ambiguous, empty, multi-token)
 - **`test/setup.test.js`** — E2E subprocess tests for `scripts/setup-watchdog.js`
 - **`test/stop-watchdog.test.js`** — E2E subprocess tests for `scripts/stop-watchdog.js`
-- **`test/stop-hook.test.js`** — E2E subprocess tests for `hooks/stop-hook.js` including the recursion guard, ownership claim, max iterations cap, missing transcript, and pure-text turn branches
+- **`test/stop-hook.test.js`** — E2E subprocess tests for `hooks/stop-hook.js` covering the recursion guard, ownership claim, max iterations cap, missing transcript, and pure-text turn branches (Haiku subprocess not invoked)
+- **`test/stop-hook-haiku.test.js`** — E2E integration tests that exercise the **real** `spawnSync('claude', ...)` subprocess path by placing a cross-platform mock Claude CLI (POSIX shell script + Windows `.cmd` wrapper) on the hook's `PATH`. Tests all verdict branches: FILE_CHANGES / NO_FILE_CHANGES / ambiguous (both markers) / ambiguous (neither marker) / CLI failure
 
 In addition to the unit/integration suite, you should **also** manually verify your change in a live Claude Code session:
 

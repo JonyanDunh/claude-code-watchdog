@@ -404,7 +404,7 @@ claude-code-watchdog/
 
 ## Test
 
-Watchdog 1.1.0 đi kèm 53 test tự động, chạy bằng runner `node:test` có sẵn của Node — không phải cài thêm dependency ngoài nào. Chạy từ gốc repo.
+Watchdog 1.1.0 đi kèm 59 test tự động, chạy bằng runner `node:test` có sẵn của Node — không phải cài thêm dependency ngoài nào. Chạy từ gốc repo.
 
 **Node 22+:**
 

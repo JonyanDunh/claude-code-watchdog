@@ -43,7 +43,8 @@ jobs:
             test/judge.test.js \
             test/setup.test.js \
             test/stop-watchdog.test.js \
-            test/stop-hook.test.js
+            test/stop-hook.test.js \
+            test/stop-hook-haiku.test.js
 
   jsonlint:
     name: Lint JSON manifests
