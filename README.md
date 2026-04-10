@@ -10,7 +10,7 @@ English | [中文](./README.zh.md)
 
 > **Watch the agent. Catch the lies. Stop only when the work is actually done.**
 
-_A Claude Code plugin that keeps the current agent in a self-referential loop inside a single session and refuses to let it quit until the task genuinely stops producing file edits. No `<promise>` tags. No "completion flag". No way for the agent to cheat its way out._
+_A Claude Code plugin that keeps the current agent in a self-referential loop inside a single session and refuses to let it quit until the task genuinely stops producing file edits — no "completion flag", no way for the agent to cheat its way out._
 
 [Quick Start](#quick-start) • [Why Watchdog?](#why-watchdog) • [How It Works](#how-it-works) • [Commands](#commands) • [Installation](#installation) • [Inspired By](#inspired-by)
 
@@ -69,17 +69,28 @@ Everything else is automatic. The agent never knows a loop is running.
 
 ## How It Works
 
-```text
-1. /watchdog:start "<task>"              user runs this once
-2. Claude works on the task              reads, edits, writes, runs tests
-3. Claude's turn ends                    assistant stops naturally
-4. Stop hook fires                       inspects the current turn's tool_use blocks
-5a. Tools called AND files changed       → re-feed prompt + verification reminder → step 2
-5b. Tools called AND no file changes     → remove state file → session exits normally
-5c. No tools called at all               → re-feed prompt (must prove verification) → step 2
+You run the command **once**, then Claude Code handles the rest:
+
+```bash
+# You run ONCE:
+/watchdog:start "Your task description" --max-iterations 20
+
+# Then Claude Code automatically:
+# 1. Works on the task
+# 2. Tries to exit
+# 3. Stop hook blocks the exit and re-feeds the SAME prompt
+# 4. Claude iterates on the same task, seeing its own previous edits
+# 5. Repeat until a turn finishes without modifying any project file
+#    (or --max-iterations is reached)
 ```
 
-The loop isn't external — no `while true`, no orchestrator process. A Stop hook installed by the plugin blocks Claude Code's session exit and re-injects the original prompt as a new user turn, using Claude Code's native `{"decision": "block", "reason": ...}` protocol.
+The loop happens **inside your current session** — no external `while true`, no orchestrator process. The Stop hook in `hooks/stop-hook.sh` blocks normal session exit and re-injects the prompt as a new user turn using Claude Code's native `{"decision": "block", "reason": ...}` protocol.
+
+This creates a **self-referential feedback loop** where:
+- The prompt never changes between iterations
+- Claude's previous work persists in files
+- Each iteration sees modified files and git history
+- Claude autonomously improves by reading its own past work
 
 ### Exit Conditions
 
@@ -208,19 +219,39 @@ From the agent's point of view, the same user is asking the same question over a
 
 ## Prompt Writing Best Practices
 
-### 1. Clear completion criteria
+### 1. Clear Completion Criteria
 
 Write the prompt so "no more edits needed" is a genuine, verifiable answer.
 
-❌ Bad: _"Build a todo API and make it good."_
+❌ Bad: "Build a todo API and make it good."
 
-✅ Good: _"Build a REST API for todos in `src/api/todos.ts`. Requirements: CRUD endpoints, input validation, 80%+ test coverage in `tests/todos.test.ts`. Iterate until all tests pass and coverage is met."_
+✅ Good:
 
-### 2. Verifiable, incremental goals
+```markdown
+Build a REST API for todos in `src/api/todos.ts`.
+
+Requirements:
+- All CRUD endpoints working
+- Input validation in place
+- 80%+ test coverage in `tests/todos.test.ts`
+- All tests pass with `pnpm test`
+```
+
+### 2. Incremental, verifiable goals
 
 The loop exits on "no files modified". If your task has no verifiable end state, it will just spin.
 
-✅ Good: _"Refactor `services/cache.ts` to remove the legacy LRU implementation. Update all callers in `src/`. Run `pnpm typecheck && pnpm test:cache` after each change. Iterate until both pass without warnings."_
+✅ Good:
+
+```markdown
+Refactor `services/cache.ts` to remove the legacy LRU implementation.
+
+Steps:
+1. Delete the old LRU class and its tests
+2. Update all callers in `src/` to use the new cache API
+3. Run `pnpm typecheck && pnpm test:cache` after each change
+4. Iterate until both pass without warnings
+```
 
 ### 3. Self-correcting structure
 
