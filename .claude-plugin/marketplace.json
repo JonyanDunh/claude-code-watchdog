@@ -10,7 +10,7 @@
     {
       "name": "watchdog",
       "description": "A self-referential loop for Claude Code that re-feeds the user's prompt until the task truly stops producing file edits. Uses a headless Haiku classifier to judge convergence, requires the agent to actually call tools before exit (no pure-text 'done' claims), and is hidden from the agent so it cannot cheat. Per-session state keyed by TERM_SESSION_ID. Apache 2.0, derived from ralph-loop.",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": {
         "name": "Jonyan Dunh",
         "email": "jonyandunh@outlook.com"
@@ -30,5 +30,5 @@
       ]
     }
   ],
-  "version": "1.0.1"
+  "version": "1.0.2"
 }

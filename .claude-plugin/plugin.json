@@ -1,6 +1,6 @@
 {
   "name": "watchdog",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Continuous self-referential AI watchdog for interactive iterative development. Runs Claude in a while-true loop with the same prompt until the task stops producing file edits.",
   "author": {
     "name": "Jonyan Dunh",
