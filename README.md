@@ -1,90 +1,116 @@
-English | [中文](./README_CN.md)
+English | [中文](./README.zh.md)
 
-# Watchdog Plugin
+# Watchdog
 
-A Claude Code plugin that runs the current agent in a self-referential loop inside the same session, repeatedly re-feeding the user's original prompt until the task converges (no more file modifications) or a safety limit is reached.
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1%2B-7C4DFF.svg)](https://docs.anthropic.com/claude-code)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](./.claude-plugin/plugin.json)
+[![GitHub stars](https://img.shields.io/github/stars/JonyanDunh/claude-code-watchdog?style=flat&color=yellow)](https://github.com/JonyanDunh/claude-code-watchdog/stargazers)
+[![Inspired by ralph-loop](https://img.shields.io/badge/Inspired%20by-ralph--loop-orange.svg)](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop)
 
-## What is Watchdog?
+> **Watch the agent. Catch the lies. Stop only when the work is actually done.**
 
-Watchdog is the "Ralph" technique adapted for Claude Code's plugin system. You give Claude a prompt once; a Stop hook then intercepts every natural end of turn and feeds the same prompt back, pushing Claude to iterate on the same task until it genuinely stops producing file changes.
+_A Claude Code plugin that keeps the current agent in a self-referential loop inside a single session and refuses to let it quit until the task genuinely stops producing file edits. No `<promise>` tags. No "completion flag". No way for the agent to cheat its way out._
 
-The "loop" is not external — no bash `while true`, no outer orchestrator. The plugin installs a Stop hook that blocks the session from exiting and re-injects the prompt as a new user turn.
+[Quick Start](#quick-start) • [Why Watchdog?](#why-watchdog) • [How It Works](#how-it-works) • [Commands](#commands) • [Installation](#installation) • [Inspired By](#inspired-by)
 
-### Core Concept
+---
 
-```text
-1. /start "<task>"              — user runs this once
-2. Claude works on the task          — reads, edits, writes, tests
-3. Claude's turn ends                — assistant stops
-4. Stop hook fires                   — checks if any file was modified this turn
-5a. Files were modified              → re-feed the prompt + verification reminder → back to step 2
-5b. No files modified this turn      → remove state file → session exits normally
-```
+## Core Maintainer
+
+| Role | Name | GitHub |
+| --- | --- | --- |
+| Creator & Maintainer | Jonyan Dunh | [@JonyanDunh](https://github.com/JonyanDunh) |
+
+---
 
 ## Quick Start
 
+**Step 1: Install**
+
 ```bash
-/start "Fix the flaky auth tests in tests/auth/*.ts. Keep iterating until the whole suite passes." --max-iterations 20
+/plugin marketplace add https://github.com/JonyanDunh/claude-code-watchdog
+/plugin install watchdog
 ```
 
-Claude will:
-- Read the test files, diagnose failures
-- Edit the failing code
-- Run the tests again
-- Iterate on fixes
-- Stop automatically once it finishes a turn without changing any file
+**Step 2: Verify**
+
+```bash
+/watchdog:help
+```
+
+**Step 3: Start a watchdog**
+
+```bash
+/watchdog:start "Fix the flaky auth tests in tests/auth/*.ts. Keep iterating until the whole suite passes." --max-iterations 20
+```
+
+That's it. Watchdog re-feeds your prompt after every turn until Claude either:
+
+- finishes a turn without modifying any file, **or**
+- hits the `--max-iterations` safety cap, **or**
+- you manually run `/watchdog:stop`.
+
+Everything else is automatic. The agent never knows a loop is running.
+
+---
+
+## Why Watchdog?
+
+- **Zero agent cheating** — The agent is never told it is inside a loop. No `systemMessage`, no iteration counter, no setup banner. It cannot short-circuit by emitting a fake completion signal.
+- **Forced tool verification** — A pure-text turn ("I've checked, all good") never ends the loop. The agent **must** actually invoke a tool before exit is even considered.
+- **LLM-judged, universal file-change detection** — A headless `claude -p --model haiku` call is the **only** judge of "did this turn modify any file". It reads the turn's tool invocations (tool name + raw Bash command text) and decides semantically whether **any** file on disk changed — regular files, hidden files, dotfiles, cache files, lock files, index files, database files, log files, files managed internally by other programs, metadata-only updates (timestamps/permissions), everything. **No category is excluded**, and **no hard-coded rubric, tool-name whitelist, or bash pattern matcher** is used in the hook. The LLM's semantic understanding is the entire decision.
+- **Per-session isolation** — State file keyed by `TERM_SESSION_ID`, so running multiple watchdogs in different terminal tabs never collide.
+- **Hidden by design** — All diagnostic output goes to stderr. The JSONL transcript never leaks loop metadata into the agent's context.
+- **Apache 2.0** — Cleanly derived from Anthropic's own `ralph-loop` plugin, with full attribution in [NOTICE](./NOTICE).
+
+---
+
+## How It Works
+
+```text
+1. /watchdog:start "<task>"              user runs this once
+2. Claude works on the task              reads, edits, writes, runs tests
+3. Claude's turn ends                    assistant stops naturally
+4. Stop hook fires                       inspects the current turn's tool_use blocks
+5a. Tools called AND files changed       → re-feed prompt + verification reminder → step 2
+5b. Tools called AND no file changes     → remove state file → session exits normally
+5c. No tools called at all               → re-feed prompt (must prove verification) → step 2
+```
+
+The loop isn't external — no `while true`, no orchestrator process. A Stop hook installed by the plugin blocks Claude Code's session exit and re-injects the original prompt as a new user turn, using Claude Code's native `{"decision": "block", "reason": ...}` protocol.
+
+### Exit Conditions
+
+The loop exits when **both** of these are true for the latest assistant turn:
+
+| Check | Requirement |
+| --- | --- |
+| **Tool usage precondition** | The turn must have invoked at least one tool. Pure-text turns never exit. |
+| **Haiku classifier verdict** | A headless `claude -p --model haiku` call returns `NO_FILE_CHANGES`. The classifier reads the turn's `tool_use` blocks (tool name + raw Bash command text) and decides semantically whether **any** file on disk was modified, **across every category** — regular, hidden, cache, lock, index, internal, metadata-only edits — with no exclusion list. |
+
+If either check fails, the loop continues. Additional exit paths:
+
+- `--max-iterations` reached (hard cap, always respected)
+- User runs `/watchdog:stop` (removes the state file)
+- State file manually removed from disk
+
+---
 
 ## Commands
 
-### `/start <PROMPT> [--max-iterations N]`
+| Command | Effect | Example |
+| --- | --- | --- |
+| `/watchdog:start <PROMPT> [--max-iterations N]` | Start a watchdog in the current session | `/watchdog:start "Refactor services/cache.ts. Iterate until pnpm test:cache passes." --max-iterations 20` |
+| `/watchdog:stop` | Cancel the watchdog in the current session | `/watchdog:stop` |
+| `/watchdog:help` | Print the full reference inside Claude Code | `/watchdog:help` |
 
-Starts a watchdog in the current Claude Code session. Writes a per-session state file at `.claude/watchdog.<TERM_SESSION_ID>.local.json` and echoes the prompt as the first turn's input.
-
-**Options:**
-- `--max-iterations <n>` — Hard cap on iterations. Default: unlimited. **Strongly recommended.**
-
-**Requirements:**
-- The environment must have `TERM_SESSION_ID` set (populated by most modern terminal emulators: iTerm2, WezTerm, Windows Terminal, modern Linux terminals). Without it the setup script refuses to run — the plugin uses this UUID as the per-session state file key.
-
-### `/stop`
-
-Removes the current session's state file so the next Stop hook firing allows the session to exit normally. Idempotent — running it when no loop is active just prints a message.
-
-### `/help`
-
-Shows the full command reference and a concept summary.
-
-## How the Stop Hook Decides
-
-The Stop hook makes the loop exit when **both** of these are true for the latest assistant turn:
-
-1. **Tools were actually called.** A pure-text turn (agent says "I've verified, all good" without any tool use) never exits the loop — it re-feeds the prompt with a verification reminder to force the agent to actually run tools next turn.
-2. **A headless Haiku classifier judges no files were modified this turn.** The hook extracts the turn's `tool_use` invocations as compact JSON (tool name + bash command when applicable), hands them to `claude -p --model haiku`, and asks it to return either `FILE_CHANGES` or `NO_FILE_CHANGES`. Only `NO_FILE_CHANGES` triggers loop exit.
-
-Why an LLM classifier instead of a hardcoded tool-name filter:
-- Bash commands like `sed -i`, `awk -i inplace`, `> file`, `mv`, `rm`, `git add`, etc. all modify files but would be missed by a naive `Edit|Write|NotebookEdit` filter.
-- The classifier reads the actual command text and decides semantically.
-- Per-session correct: only the current session's transcript is inspected, so concurrent watchdogs don't cross-contaminate.
-
-### What triggers the loop to keep going
-
-- Any `Edit`, `Write`, `NotebookEdit`, or file-mutating `Bash` command in the turn
-- A pure-text turn (zero tool calls) — forces another iteration so the agent has to actually verify
-- An ambiguous or failing Haiku response (fail-safe: continue rather than drop in-progress work)
-- `--max-iterations` has not been reached yet
-
-### What triggers the loop to exit
-
-- The turn has at least one tool call **and** Haiku returns `NO_FILE_CHANGES`
-- `--max-iterations` reached
-- `/stop` run manually
-- The state file was removed from disk (e.g. another session cleaned it up)
+---
 
 ## State File
 
-Location: `.claude/watchdog.<TERM_SESSION_ID>.local.json`
+Per-session state lives at `.claude/watchdog.<TERM_SESSION_ID>.local.json`:
 
-Example:
 ```json
 {
   "active": true,
@@ -96,11 +122,12 @@ Example:
 }
 ```
 
-Each session has its own file keyed by `TERM_SESSION_ID`, so running multiple watchdogs in different terminal tabs works without conflict.
+Each session has its own file, keyed by `TERM_SESSION_ID`. Running multiple watchdogs in different terminal tabs works without conflict.
 
-**Monitor an active loop:**
+**Monitor active watchdogs:**
+
 ```bash
-# Show all active per-session state files
+# List all active per-session state files in this project
 ls .claude/watchdog.*.local.json
 
 # Current iteration of a specific session
@@ -110,38 +137,88 @@ jq .iteration .claude/watchdog.<SESSION_ID>.local.json
 jq . .claude/watchdog.<SESSION_ID>.local.json
 ```
 
-**Manually kill all loops in this project:**
+**Manually kill everything in this project:**
+
 ```bash
 rm -f .claude/watchdog.*.local.json
 ```
 
+---
+
+## Installation
+
+### Primary: marketplace install (recommended)
+
+```bash
+/plugin marketplace add https://github.com/JonyanDunh/claude-code-watchdog
+/plugin install watchdog
+```
+
+Verify with `/watchdog:help`.
+
+### Alternative: single-session local load
+
+To try Watchdog without touching your global config, load it for one session only:
+
+```bash
+claude --plugin-dir /absolute/path/to/claude-code-watchdog
+```
+
+### Alternative: manual install via `settings.json`
+
+For CI/CD, corporate deployments, or offline use, clone the repo and wire it up manually in `~/.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "claude-code-watchdog": {
+      "source": {
+        "source": "directory",
+        "path": "/absolute/path/to/claude-code-watchdog"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "watchdog@claude-code-watchdog": true
+  }
+}
+```
+
+Then run `/reload-plugins` inside Claude Code.
+
+---
+
 ## Hiding the Loop From the Agent
 
-By design, the agent **must not know it is inside a loop**. If it knew, it would be tempted to short-circuit by claiming completion after the first turn or by producing a completion signal from memory without verifying.
+By design, **the agent must not know it is inside a loop**. If it knew, it would be tempted to short-circuit by claiming completion from memory on the first turn. Watchdog enforces this by:
 
-To enforce this the plugin:
-- Emits **no** `systemMessage` field from the Stop hook (no iteration counter, no status banner).
-- The setup script writes **only the user's prompt** to stdout — no "Loop activated, iteration 1" header.
-- The re-fed prompt contains the original text plus a single English verification reminder:
+- **No `systemMessage`** emitted from the Stop hook — no iteration counter, no status banner.
+- **Setup script writes only the user's prompt to stdout** — no "Loop activated, iteration 1" header, no initialization output the agent would see.
+- **Re-fed prompt is the original text + a single verification reminder**, in plain English:
+
   > Please re-run the verification by actually invoking tools. Do not, without performing any real tool calls, base your answer on prior context and tell me the check is complete.
-- All hook diagnostic output goes to stderr (`>&2`), not stdout, so Claude Code's transcript doesn't pick it up as agent context.
 
-The agent sees what looks like the same user asking the same question over and over, occasionally adding "please actually re-run the checks". It has no reason to believe there's a Stop hook driving the repetition.
+- **All diagnostics go to stderr (`>&2`)** — Claude Code's transcript does not capture them as agent context.
+
+From the agent's point of view, the same user is asking the same question over and over, occasionally adding "please actually re-run the checks". There is no visible Stop hook, no iteration counter, no loop metadata. The agent cannot cheat what it does not know exists.
+
+---
 
 ## Prompt Writing Best Practices
 
 ### 1. Clear completion criteria
 
-Write the prompt as something that can genuinely be answered by "no more edits needed".
+Write the prompt so "no more edits needed" is a genuine, verifiable answer.
 
-❌ Bad: "Build a todo API and make it good."
-✅ Good: "Build a REST API for todos in `src/api/todos.ts`. Requirements: CRUD endpoints, input validation, 80%+ test coverage in `tests/todos.test.ts`. Iterate until all tests pass and coverage is met."
+❌ Bad: _"Build a todo API and make it good."_
 
-### 2. Incremental, verifiable goals
+✅ Good: _"Build a REST API for todos in `src/api/todos.ts`. Requirements: CRUD endpoints, input validation, 80%+ test coverage in `tests/todos.test.ts`. Iterate until all tests pass and coverage is met."_
+
+### 2. Verifiable, incremental goals
 
 The loop exits on "no files modified". If your task has no verifiable end state, it will just spin.
 
-✅ Good: "Refactor `services/cache.ts` to remove the legacy LRU implementation. Update all callers in `src/`. Run `pnpm typecheck && pnpm test:cache` after each change. Iterate until both pass without warnings."
+✅ Good: _"Refactor `services/cache.ts` to remove the legacy LRU implementation. Update all callers in `src/`. Run `pnpm typecheck && pnpm test:cache` after each change. Iterate until both pass without warnings."_
 
 ### 3. Self-correcting structure
 
@@ -150,70 +227,114 @@ Tell the agent how to notice failure and adapt.
 ```markdown
 Implement feature X using TDD:
 1. Write failing tests in tests/feature-x.test.ts
-2. Implement minimum code to pass
+2. Write minimum code to pass
 3. Run `pnpm test:feature-x`
 4. If any test fails, read the failure, fix, re-run
-5. Refactor for clarity once green
+5. Refactor only after all tests are green
 ```
 
 ### 4. Always set `--max-iterations`
 
 The Haiku classifier is not infallible. A stuck agent that keeps making meaningless edits, or one that gets confused and stops editing prematurely, should fall through to a hard stop. `--max-iterations 20` is a reasonable default.
 
-## When to Use the Watchdog
+---
+
+## When to Use Watchdog
 
 **Good for:**
+
 - Tasks with clear, automated success criteria (tests, lints, typechecks)
 - Iterative refinement: fix → test → fix → test
 - Greenfield implementations you can walk away from
-- Reviewing existing code and fixing issues
+- Systematic code review with fixes
 
 **Not good for:**
+
 - Tasks requiring human judgment or design decisions
 - One-shot operations (a single command, a single file edit)
 - Anything where "done" is subjective
 - Production debugging that needs external context
 
-## Limitations and Known Issues
+---
 
-- **`TERM_SESSION_ID` not exported**: Some terminal emulators don't set this. Workaround: `export TERM_SESSION_ID=$(uuidgen)` before launching `claude`.
-- **Two `claude` in the same terminal tab**: They share `TERM_SESSION_ID` and will stomp on each other's state file. Use separate tabs.
-- **Haiku cost per iteration**: Each Stop hook firing spends ~10 seconds and a small amount of tokens on a headless `claude -p --model haiku` classification call. This is the main latency cost of the loop.
-- **Haiku requires `claude` CLI in PATH**: The hook relies on the `claude` CLI being available and authenticated (OAuth or `ANTHROPIC_API_KEY`). If unavailable the hook falls through to "continue loop" as a safety default rather than dropping work.
-- **The Stop hook only fires when Claude naturally stops**: If a tool call crashes the hook, the state file may linger. `/stop` cleans it up.
+## Requirements
+
+| Requirement | Why |
+| --- | --- |
+| **Claude Code 2.1+** | Uses the Stop hook system and marketplace plugin format |
+| **`TERM_SESSION_ID`** env var | Keys the per-session state file. Set by most terminal emulators (iTerm2, WezTerm, Windows Terminal, modern Linux terminals). Workaround if unset: `export TERM_SESSION_ID=$(uuidgen)` before launching `claude`. |
+| **`jq`** in `PATH` | Used by the Stop hook to parse transcript JSONL and state file JSON |
+| **`claude` CLI** in `PATH` | Used for the headless Haiku classification call. Must be authenticated (OAuth or `ANTHROPIC_API_KEY`) |
+
+---
+
+## Limitations & Known Issues
+
+- **Haiku cost per iteration** — Each Stop hook firing spends ~10 seconds and a small amount of tokens on a headless `claude -p --model haiku` call. This is the main latency cost of the loop.
+- **Two `claude` sessions in the same terminal tab** — They share `TERM_SESSION_ID` and will clobber each other's state file. Use separate tabs.
+- **Hook only fires on natural stops** — If a tool call crashes Claude Code itself, the state file may linger. Use `/watchdog:stop` to clean it up.
+- **Fail-safe direction is "continue"** — If the Haiku call fails (network, auth, parse error), the loop continues rather than exiting. Better to over-iterate than drop in-progress work.
+
+---
 
 ## Plugin Layout
 
+This repo is both the marketplace and the plugin — `marketplace.json` points to `./`.
+
 ```
-watchdog/
+claude-code-watchdog/
 ├── .claude-plugin/
-│   └── plugin.json          # name, version, description
+│   ├── marketplace.json     # marketplace manifest
+│   └── plugin.json          # plugin manifest
 ├── commands/
 │   ├── start.md             # /watchdog:start
 │   ├── stop.md              # /watchdog:stop
 │   └── help.md              # /watchdog:help
 ├── hooks/
 │   ├── hooks.json           # registers the Stop hook
-│   └── stop-hook.sh         # the core loop logic (stays named stop-hook)
-└── scripts/
-    ├── setup-watchdog.sh    # creates the state file
-    └── stop-watchdog.sh     # removes the state file
+│   └── stop-hook.sh         # the core loop logic
+├── scripts/
+│   ├── setup-watchdog.sh    # creates the state file
+│   └── stop-watchdog.sh     # removes the state file
+├── .gitattributes           # forces LF line endings (critical for shell scripts)
+├── LICENSE                  # Apache License 2.0
+├── NOTICE                   # attribution to ralph-loop
+├── README.md                # this file
+└── README.zh.md             # Chinese translation
 ```
 
-## For Help
-
-Run `/help` in Claude Code for the full command reference.
+---
 
 ## Inspired By
 
-This plugin is inspired by the [**ralph-loop**](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop) plugin in Anthropic's official claude-plugins repository. The original used a `<promise>` XML-tag protocol where the agent explicitly declared completion.
+Watchdog is a derivative work of Anthropic's [**ralph-loop**](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop) plugin (Apache License 2.0, © Anthropic, PBC). The original `ralph-loop` used a `<promise>COMPLETE</promise>` XML-tag protocol where the agent explicitly declared completion.
 
-Watchdog keeps the same core mechanic (a Stop hook that re-feeds the prompt) and changes a few things on top:
+Watchdog keeps the core mechanic — a Stop hook that re-feeds the prompt — and changes these things on top:
 
-- **Headless Haiku classifier instead of a hard-coded tool filter** — catches Bash-driven file mutations like `sed -i`, `mv`, `> file` that a naive `Edit|Write|NotebookEdit` whitelist would miss.
-- **Exit precondition: the turn must have called at least one tool** — prevents the agent from cheating by claiming "done" in plain text without actually verifying.
-- **Hidden loop** — no `systemMessage`, no setup-script banner, diagnostics go to stderr. The agent has no way to tell it's inside a loop, so it can't short-circuit by emitting a fake completion signal.
-- **Per-session state file keyed by `TERM_SESSION_ID`** — multiple watchdogs in different terminal tabs don't clobber each other's state.
-- **Re-fed prompt carries an English verification reminder** — pushes the agent to re-run tool calls instead of answering from memory.
+| | Watchdog | ralph-loop |
+| --- | --- | --- |
+| **Exit trigger** | Headless Haiku classifier is the **only** judge. It reads the turn's tool calls (including raw Bash command text) and decides semantically whether **any** file on disk changed — universal scope, no category excluded. No rubric, no tool-name whitelist, no bash pattern matcher, no enumeration of "mutating" commands anywhere in the hook. | The agent must emit a `<promise>…</promise>` XML tag in its final text. The phrase inside the tags is configurable via `--completion-promise "…"` (e.g. `COMPLETE`, `DONE`). A Stop hook grep matches the exact string. |
+| **Exit precondition** | Tools must have been called **AND** Haiku says `NO_FILE_CHANGES` | Just the `<promise>` text match. The agent can cheat by emitting the tag prematurely; ralph-loop's only defense is a prompt that asks the agent not to lie. |
+| **Agent visibility** | Completely hidden (no systemMessage, no banner, stderr-only diagnostics) | Agent is told about the loop and the promise protocol |
+| **State scoping** | Per-session file keyed by `TERM_SESSION_ID` | Project-scoped single state file |
+| **State file format** | JSON (parsed with jq) | Markdown with YAML frontmatter (parsed with sed/awk/grep) |
 
-Thanks to the ralph-loop authors for the foundational idea.
+See [`NOTICE`](./NOTICE) for the full attribution and the complete list of modifications.
+
+---
+
+## License
+
+Apache License 2.0. See [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).
+
+Watchdog is a derivative work of `ralph-loop` (© Anthropic, PBC, Apache 2.0). This project is **not affiliated with or endorsed by Anthropic**.
+
+---
+
+<div align="center">
+
+**Inspired by:** [ralph-loop](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop) (Anthropic, PBC)
+
+**Watch the agent. Catch the lies. Stop only when the work is truly done.**
+
+</div>

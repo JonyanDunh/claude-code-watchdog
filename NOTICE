@@ -1,0 +1,65 @@
+Watchdog
+Copyright 2026 Jonyan Dunh
+
+This product is licensed under the Apache License, Version 2.0 (the
+"License"). You may not use this product except in compliance with the
+License. You may obtain a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+Attribution
+================================================================================
+
+This product contains software derived from the "ralph-loop" plugin
+developed by Anthropic, PBC and distributed under the Apache License,
+Version 2.0:
+
+    https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop
+
+The original ralph-loop plugin is Copyright Anthropic, PBC, licensed under
+Apache License, Version 2.0. The Watchdog plugin keeps ralph-loop's core
+mechanic (a Stop hook that re-feeds the user's prompt to drive a
+self-referential iterative loop inside a single Claude Code session) and
+introduces the following substantive modifications:
+
+  - Replaced the <promise> XML-tag exit protocol with a headless
+    Claude Haiku classifier that reads the current turn's tool_use
+    invocations and decides whether any files were modified. This
+    catches Bash-driven file mutations (sed -i, mv, > file, git add,
+    etc.) that a tool-name whitelist would miss.
+
+  - Added an exit precondition: the turn must have called at least
+    one tool before the loop is allowed to exit. A pure-text response
+    ("I've verified, all good") never terminates the loop, preventing
+    the agent from claiming completion without doing real verification.
+
+  - Hid the loop from the agent. The Stop hook emits no systemMessage,
+    the setup script writes only the user's prompt to stdout, and all
+    diagnostic output is routed to stderr. The agent has no way to
+    tell it is running inside a loop and therefore cannot short-circuit
+    by emitting a fake completion signal.
+
+  - Introduced per-session state files keyed by TERM_SESSION_ID so
+    concurrent watchdogs in different terminal tabs do not clobber
+    each other's state. The state file format was also switched from
+    markdown-with-YAML-frontmatter to JSON, parsed with jq.
+
+  - Appended an English verification reminder to every re-fed prompt,
+    instructing the agent to re-run the verification with real tool
+    calls instead of answering from prior context or memory.
+
+  - Fixed a transcript-parsing bug in the Stop hook where tool_result
+    entries (which carry role=user in the JSONL transcript) were being
+    mistaken for turn boundaries, causing the current turn's tool_use
+    blocks to be excluded from the classification prompt.
+
+Files significantly modified from their ralph-loop originals include:
+
+  - hooks/stop-hook.sh
+  - scripts/setup-watchdog.sh (originally scripts/setup-ralph-loop.sh)
+  - scripts/stop-watchdog.sh  (originally scripts/cancel-ralph.sh)
+  - commands/start.md         (originally commands/ralph-loop.md)
+  - commands/stop.md          (originally commands/cancel-ralph.md)
+
+See each file's header comment for a per-file attribution notice.

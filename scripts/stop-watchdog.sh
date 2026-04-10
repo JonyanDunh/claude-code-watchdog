@@ -1,9 +1,18 @@
 #!/bin/bash
-
+#
 # Watchdog Cancel Script
 # Removes the per-session state file so the Stop hook stops re-feeding the
 # prompt. Idempotent: if no active loop exists for this session, exits
 # cleanly with an informational message.
+#
+# Originally derived from the ralph-loop plugin's cancel-ralph command:
+#   https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop
+# Copyright Anthropic, PBC. Licensed under the Apache License, Version 2.0.
+#
+# Modified for Watchdog by Jonyan Dunh, 2026: converted from a
+# Claude-driven instructions markdown into a standalone shell script and
+# switched to a per-session state file keyed by TERM_SESSION_ID.
+# See the NOTICE file for the full change list.
 
 set -euo pipefail
 

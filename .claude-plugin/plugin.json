@@ -5,5 +5,18 @@
   "author": {
     "name": "Jonyan Dunh",
     "email": "jonyandunh@outlook.com"
-  }
+  },
+  "repository": "https://github.com/JonyanDunh/claude-code-watchdog",
+  "homepage": "https://github.com/JonyanDunh/claude-code-watchdog",
+  "license": "Apache-2.0",
+  "keywords": [
+    "claude-code",
+    "plugin",
+    "watchdog",
+    "agent-loop",
+    "self-referential",
+    "iteration",
+    "convergence",
+    "ralph-loop"
+  ]
 }

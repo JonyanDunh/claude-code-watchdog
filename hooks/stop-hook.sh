@@ -1,8 +1,20 @@
 #!/bin/bash
-
+#
 # Watchdog Stop Hook
-# Prevents session exit when a watchdog is active
-# Feeds Claude's output back as input to continue the loop
+# Prevents session exit when a watchdog is active.
+# Feeds Claude's output back as input to continue the loop.
+#
+# Originally derived from the ralph-loop plugin:
+#   https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop
+# Copyright Anthropic, PBC. Licensed under the Apache License, Version 2.0.
+#
+# Significantly modified for Watchdog by Jonyan Dunh, 2026:
+# replaced the <promise> XML-tag exit protocol with a headless Haiku
+# classifier, added a "must have called tools" exit precondition,
+# hid the loop from the agent (no systemMessage, stderr-only diagnostics),
+# switched state file to per-session JSON keyed by TERM_SESSION_ID, and
+# fixed a transcript turn-boundary bug involving tool_result entries.
+# See the NOTICE file at the repo root for a full summary of changes.
 
 set -euo pipefail
 
@@ -127,28 +139,27 @@ if [[ $JQ_EXIT -ne 0 ]]; then
 fi
 
 # Ask a headless Haiku instance whether any of these invocations modified
-# files on disk. Falls through (continues the loop) on any failure as a
-# safety default: better to over-iterate than to drop in-progress work.
+# files on disk. We trust Haiku's general knowledge of tool names and bash
+# commands — no hard-coded rubric, no enumeration of "mutating" commands.
+# Haiku reads the JSON (tool name + raw Bash command text where applicable)
+# and decides semantically. Distinctive marker tokens (FILE_CHANGES /
+# NO_FILE_CHANGES) make the classifier's output unambiguous and avoid
+# false positives from natural-language prose.
 #
-# We use distinctive markers (FILE_CHANGES / NO_FILE_CHANGES) instead of
-# plain YES/NO to make the classifier's output unambiguous: the tokens are
-# unlikely to appear in Haiku's prose by accident, and only-matching these
-# specific strings avoids false positives from natural-language answers.
+# Falls through (continues the loop) on any failure as a safety default:
+# better to over-iterate than to drop in-progress work.
 JUDGMENT_PROMPT=$(cat <<PROMPT_EOF
-You are a binary classifier. Below is a JSON array of tool invocations made by an agent in a single turn. Decide whether any of them modified files on the filesystem.
+You are a binary classifier. Below is a JSON array of tool invocations from a single agent turn. Did ANY of them cause ANY on-disk change to ANY file?
 
-An invocation "modifies files" if it creates, overwrites, appends to, deletes, renames, moves, or edits any file.
+Scope is universal. EVERY file on disk counts equally, with no exceptions — regular files, hidden files, dotfiles, cache files, lock files, index files, database files, log files, config files, files managed internally by other programs, temporary files, and every other kind. There is no "internal" or "excluded" category of file. If any byte on the filesystem changes, it counts.
 
-Classification rules:
-- Edit, Write, NotebookEdit, MultiEdit -> FILE_CHANGES.
-- Bash commands that write/create/delete/rename/edit files (for example: sed -i, awk -i inplace, perl -i, output redirection with > or >>, mv, cp, rm, rmdir, touch, tee writing to a file, dd with of=, ln, git add, git commit, git reset --hard, and any command whose effect is to change the filesystem) -> FILE_CHANGES.
-- Read-only Bash commands (grep, cat, ls, find without -delete, wc, head, tail, ps, git status, git log, git diff, etc.) -> NO_FILE_CHANGES for that invocation alone.
-- Read, Grep, Glob, WebFetch, WebSearch, Task -> NO_FILE_CHANGES.
-- If the turn contains BOTH modifying and non-modifying invocations, answer FILE_CHANGES.
+Changes include but are not limited to: content edits, creation, deletion, rename, move, copy that produces a new file, append, truncate, and metadata updates such as timestamps, permissions, and ownership.
 
-Output exactly one of these two tokens, with no punctuation and no other text:
-FILE_CHANGES
-NO_FILE_CHANGES
+When in doubt, err on the side of FILE_CHANGES.
+
+Output exactly one uppercase token with no other text:
+- FILE_CHANGES    if ANY file on disk changed in ANY way
+- NO_FILE_CHANGES if no file on disk changed at all
 
 Tool invocations:
 $TOOL_USES

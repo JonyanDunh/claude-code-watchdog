@@ -1,7 +1,17 @@
 #!/bin/bash
-
+#
 # Watchdog Setup Script
-# Creates state file for in-session Watchdog
+# Creates the per-session state file for an in-session Watchdog loop.
+#
+# Originally derived from the ralph-loop plugin's setup-ralph-loop.sh:
+#   https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop
+# Copyright Anthropic, PBC. Licensed under the Apache License, Version 2.0.
+#
+# Modified for Watchdog by Jonyan Dunh, 2026: dropped the
+# --completion-promise option, switched state file from markdown-with-YAML
+# to JSON keyed by TERM_SESSION_ID, removed all status banners from stdout
+# so the agent cannot tell it is inside a loop, and now requires
+# TERM_SESSION_ID to be set. See the NOTICE file for the full change list.
 
 set -euo pipefail
 
