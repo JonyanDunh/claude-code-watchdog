@@ -1,4 +1,4 @@
-[English](./README.md) | 中文
+[English](./README.md) | 中文 | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Español](./README.es.md) | [Tiếng Việt](./README.vi.md) | [Português](./README.pt.md)
 
 # Watchdog
 
