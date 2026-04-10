@@ -33,7 +33,17 @@ jobs:
           done
       - name: Run the test suite
         shell: bash
-        run: node --test 'test/*.test.js'
+        # Explicit file list — Node's --test glob support only landed in
+        # v21+. Listing files keeps CI working on Node 18 and 20 (which
+        # treat 'test/*.test.js' as a literal path).
+        run: |
+          node --test \
+            test/transcript.test.js \
+            test/state.test.js \
+            test/judge.test.js \
+            test/setup.test.js \
+            test/stop-watchdog.test.js \
+            test/stop-hook.test.js
 
   jsonlint:
     name: Lint JSON manifests

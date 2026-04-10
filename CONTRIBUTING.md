@@ -84,7 +84,11 @@ Common types:
 Watchdog ships with 53 automated tests using Node's built-in `node:test` runner — no external test dependencies. Run them from the repo root:
 
 ```bash
+# Node 22+: glob pattern
 node --test 'test/*.test.js'
+
+# Node 18/20: shell expansion (quotes removed) or explicit file list
+node --test test/*.test.js
 ```
 
 Target an individual file:

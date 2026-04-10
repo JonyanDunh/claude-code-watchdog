@@ -395,7 +395,7 @@ claude-code-watchdog/
 │   ├── setup.test.js
 │   ├── stop-watchdog.test.js
 │   └── stop-hook.test.js
-├── .github/                 # CI workflow (shellcheck → node --test), issue/PR templates
+├── .github/                 # CI workflow (node --test マトリクス, jsonlint, markdownlint) + issue/PR テンプレート
 ├── .gitattributes           # forces LF line endings
 ├── LICENSE                  # Apache License 2.0
 ├── NOTICE                   # attribution to ralph-loop
@@ -407,8 +407,16 @@ claude-code-watchdog/
 
 Watchdog 1.1.0 には Node 標準の `node:test` ランナーを使った自動テストが 53 個同梱されています —— 外部依存はゼロ。リポジトリのルートから次のコマンドで実行できます。
 
+**Node 22+:**
+
 ```bash
 node --test 'test/*.test.js'
+```
+
+**Node 18 / 20**（glob サポートは Node 21 からなので、シェルに展開させるかファイルを明示列挙する）:
+
+```bash
+node --test test/*.test.js
 ```
 
 単一ファイルだけを対象にする場合：

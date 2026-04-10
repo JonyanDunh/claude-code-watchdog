@@ -394,7 +394,7 @@ claude-code-watchdog/
 │   ├── setup.test.js
 │   ├── stop-watchdog.test.js
 │   └── stop-hook.test.js
-├── .github/                 # workflow de CI (shellcheck → node --test), templates de issue/PR
+├── .github/                 # workflow de CI (matrix node --test, jsonlint, markdownlint) + templates de issue/PR
 ├── .gitattributes           # força final de linha LF
 ├── LICENSE                  # Apache License 2.0
 ├── NOTICE                   # atribuição ao ralph-loop
@@ -404,10 +404,18 @@ claude-code-watchdog/
 
 ## Testes
 
-O Watchdog 1.1.0 vem com 53 testes automatizados usando o runner nativo `node:test` — sem dependências externas. Roda eles na raiz do repo:
+O Watchdog 1.1.0 vem com 53 testes automatizados usando o runner nativo `node:test` — sem dependências externas. Roda eles na raiz do repo.
+
+**Node 22+:**
 
 ```bash
 node --test 'test/*.test.js'
+```
+
+**Node 18 / 20** (suporte a glob só chegou no Node 21, então ou deixa o shell expandir, ou lista os arquivos na mão):
+
+```bash
+node --test test/*.test.js
 ```
 
 Pra rodar um arquivo específico:

@@ -395,7 +395,7 @@ claude-code-watchdog/
 │   ├── setup.test.js
 │   ├── stop-watchdog.test.js
 │   └── stop-hook.test.js
-├── .github/                 # CI 워크플로(shellcheck → node --test), 이슈/PR 템플릿
+├── .github/                 # CI 워크플로(node --test 매트릭스, jsonlint, markdownlint) + 이슈/PR 템플릿
 ├── .gitattributes           # LF 줄바꿈 강제
 ├── LICENSE                  # Apache License 2.0
 ├── NOTICE                   # ralph-loop 출처 표기
@@ -407,8 +407,16 @@ claude-code-watchdog/
 
 Watchdog 1.1.0은 Node 내장 `node:test` 러너를 사용하는 53개의 자동화 테스트와 함께 출시됩니다 — 외부 의존성은 없습니다. 저장소 루트에서 다음과 같이 실행하세요.
 
+**Node 22+:**
+
 ```bash
 node --test 'test/*.test.js'
+```
+
+**Node 18 / 20** (glob 지원은 Node 21부터 추가되었으므로, 쉘 확장을 사용하거나 파일을 명시적으로 나열해야 합니다):
+
+```bash
+node --test test/*.test.js
 ```
 
 특정 파일만 실행하려면:

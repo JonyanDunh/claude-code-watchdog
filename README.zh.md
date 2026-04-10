@@ -394,7 +394,7 @@ claude-code-watchdog/
 │   ├── setup.test.js
 │   ├── stop-watchdog.test.js
 │   └── stop-hook.test.js
-├── .github/                 # CI workflow（shellcheck → node --test）、issue/PR 模板
+├── .github/                 # CI workflow（node --test 矩阵、jsonlint、markdownlint）+ issue/PR 模板
 ├── .gitattributes           # 强制 LF 行尾
 ├── LICENSE                  # Apache License 2.0
 ├── NOTICE                   # ralph-loop 归属声明
@@ -404,10 +404,18 @@ claude-code-watchdog/
 
 ## 测试
 
-Watchdog 1.1.0 自带 53 个自动化测试，全部基于 Node 原生的 `node:test` runner —— 零外部依赖。在仓库根目录跑：
+Watchdog 1.1.0 自带 53 个自动化测试，全部基于 Node 原生的 `node:test` runner —— 零外部依赖。在仓库根目录跑。
+
+**Node 22+：**
 
 ```bash
 node --test 'test/*.test.js'
+```
+
+**Node 18 / 20**（glob 支持是 Node 21 才加的，所以要么让 shell 帮你展开，要么列文件名）：
+
+```bash
+node --test test/*.test.js
 ```
 
 只跑单个文件：

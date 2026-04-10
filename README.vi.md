@@ -394,7 +394,7 @@ claude-code-watchdog/
 │   ├── setup.test.js
 │   ├── stop-watchdog.test.js
 │   └── stop-hook.test.js
-├── .github/                 # workflow CI (shellcheck → node --test), template issue/PR
+├── .github/                 # workflow CI (matrix node --test, jsonlint, markdownlint) + template issue/PR
 ├── .gitattributes           # ép line ending là LF
 ├── LICENSE                  # Apache License 2.0
 ├── NOTICE                   # ghi nhận nguồn ralph-loop
@@ -404,10 +404,18 @@ claude-code-watchdog/
 
 ## Test
 
-Watchdog 1.1.0 đi kèm 53 test tự động, chạy bằng runner `node:test` có sẵn của Node — không phải cài thêm dependency ngoài nào. Chạy từ gốc repo:
+Watchdog 1.1.0 đi kèm 53 test tự động, chạy bằng runner `node:test` có sẵn của Node — không phải cài thêm dependency ngoài nào. Chạy từ gốc repo.
+
+**Node 22+:**
 
 ```bash
 node --test 'test/*.test.js'
+```
+
+**Node 18 / 20** (glob chỉ được support từ Node 21 trở đi, nên phải để shell expand hoặc liệt kê file ra):
+
+```bash
+node --test test/*.test.js
 ```
 
 Nhắm vào một file duy nhất:
