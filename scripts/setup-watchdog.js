@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+'use strict';
+
+// Watchdog setup script (Node.js). Parses args, creates the per-session
+// state file, and prints the prompt to stdout so Claude Code injects it
+// as the first user turn of the loop. Every diagnostic goes to stderr so
+// the agent never sees loop metadata.
+//
+// Originally derived from the ralph-loop plugin's setup-ralph-loop.sh.
+// Copyright Anthropic, PBC. Licensed under the Apache License, Version 2.0.
+// Node.js rewrite by Jonyan Dunh, 2026 — replaces bash, jq, and POSIX
+// coreutils with a single cross-platform Node file. See NOTICE at the
+// repo root for the full change list.
+
+const { error } = require('../lib/log');
+const { create } = require('../lib/state');
+
+function parseArgs(argv) {
+  const promptParts = [];
+  let maxIterations = 0;
+  let help = false;
+
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i];
+    if (token === '-h' || token === '--help') {
+      help = true;
+      continue;
+    }
+    if (token === '--max-iterations') {
+      const next = argv[i + 1];
+      if (next === undefined) {
+        return { error: '--max-iterations requires a number argument' };
+      }
+      if (!/^\d+$/.test(next)) {
+        return { error: `--max-iterations must be a non-negative integer, got: ${next}` };
+      }
+      maxIterations = Number(next);
+      i += 1;
+      continue;
+    }
+    promptParts.push(token);
+  }
+
+  return { promptParts, maxIterations, help };
+}
+
+function printHelp() {
+  // Help is intentionally short and routed to stderr so the slash command's
+  // stdout stays empty — empty stdout means Claude Code does not feed a user
+  // turn to the agent, and the agent won't respond with a noisy
+  // "this is informational" acknowledgement. Full reference lives in
+  // commands/help.md, surfaced via /watchdog:help inside Claude Code.
+  const lines = [
+    'Watchdog — for the full reference, run inside Claude Code:',
+    '',
+    '    /watchdog:help',
+    '',
+    'Quick usage:',
+    '    /watchdog:start "<your prompt>" [--max-iterations N]',
+    '    /watchdog:stop',
+  ];
+  for (const line of lines) process.stderr.write(`${line}\n`);
+}
+
+function main() {
+  const parsed = parseArgs(process.argv.slice(2));
+
+  if (parsed.error) {
+    error(parsed.error);
+    process.exit(1);
+  }
+
+  if (parsed.help) {
+    printHelp();
+    process.exit(0);
+  }
+
+  const prompt = parsed.promptParts.join(' ').trim();
+  if (!prompt) {
+    error('No prompt provided');
+    process.stderr.write('\n');
+    process.stderr.write('   Watchdog needs a task description to work on.\n');
+    process.stderr.write('\n');
+    process.stderr.write('   Examples:\n');
+    process.stderr.write('     /watchdog:start "Build a REST API for todos"\n');
+    process.stderr.write('     /watchdog:start "Fix the auth bug" --max-iterations 20\n');
+    process.stderr.write('     /watchdog:start "Refactor the cache layer" --max-iterations 20\n');
+    process.stderr.write('\n');
+    process.stderr.write('   For the full reference: /watchdog:help\n');
+    process.exit(1);
+  }
+
+  const termSessionId = process.env.TERM_SESSION_ID;
+  if (!termSessionId) {
+    error('TERM_SESSION_ID is not set in the environment');
+    process.stderr.write('   Watchdog uses TERM_SESSION_ID to isolate per-session state files.\n');
+    process.stderr.write('   Your terminal emulator does not seem to export one.\n');
+    process.stderr.write('   Workarounds:\n');
+    process.stderr.write('     • Use a terminal that sets TERM_SESSION_ID (iTerm2, WezTerm, modern Linux terminals)\n');
+    process.stderr.write('     • Or: export TERM_SESSION_ID=$(node -e "console.log(require(\'crypto\').randomUUID())")\n');
+    process.exit(1);
+  }
+
+  create({
+    cwd: process.cwd(),
+    termSessionId,
+    prompt,
+    maxIterations: parsed.maxIterations,
+  });
+
+  // Output ONLY the user's prompt to stdout. Everything Claude Code captures
+  // from stdout becomes the first user turn of the loop, and the agent must
+  // never know it is running inside a watchdog. No banners, no iteration
+  // counters, no status messages.
+  process.stdout.write(`${prompt}\n`);
+  process.exit(0);
+}
+
+main();

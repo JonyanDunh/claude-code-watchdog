@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "claude-code-watchdog",
-  "description": "Watchdog — watches the agent and re-feeds the same prompt until the task genuinely stops producing file edits. Derived from Anthropic's ralph-loop, Apache 2.0.",
+  "name": "claude-code-watchdog-nodejs",
+  "description": "Watchdog (Node.js rewrite) — cross-platform self-referential Claude Code loop with zero bash/jq dependencies. Runs natively on Linux, macOS, and Windows. Apache 2.0, derived from ralph-loop.",
   "owner": {
     "name": "Jonyan Dunh",
     "email": "jonyandunh@outlook.com"
@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "watchdog",
-      "description": "A self-referential loop for Claude Code that re-feeds the user's prompt until the task truly stops producing file edits. Uses a headless Haiku classifier to judge convergence, requires the agent to actually call tools before exit (no pure-text 'done' claims), and is hidden from the agent so it cannot cheat. Per-session state keyed by TERM_SESSION_ID. Apache 2.0, derived from ralph-loop.",
-      "version": "1.0.3",
+      "description": "Self-referential loop for Claude Code that re-feeds the user's prompt until the task truly stops producing file edits. Cross-platform Node.js implementation with no bash / jq dependencies. Uses a headless Haiku classifier to judge convergence, requires the agent to actually call tools before exit (no pure-text 'done' claims), and is hidden from the agent so it cannot cheat. Per-session state keyed by TERM_SESSION_ID. Apache 2.0, derived from ralph-loop.",
+      "version": "1.1.0",
       "author": {
         "name": "Jonyan Dunh",
         "email": "jonyandunh@outlook.com"
@@ -26,9 +26,11 @@
         "self-referential",
         "iteration",
         "convergence",
-        "ralph-loop"
+        "ralph-loop",
+        "nodejs",
+        "cross-platform"
       ]
     }
   ],
-  "version": "1.0.3"
+  "version": "1.1.0"
 }

@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"Just look at foo.md"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/tmp/foo.md"}},{"type":"tool_use","id":"tu_2","name":"Grep","input":{"pattern":"hello"}}]}}

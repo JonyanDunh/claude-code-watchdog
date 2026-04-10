@@ -292,64 +292,71 @@ Classifier Haiku không phải là thánh. Một agent bị kẹt mà cứ loay 
 
 ## Yêu cầu hệ thống
 
+Watchdog 1.1.0 là **phiên bản viết lại bằng Node.js**. Không bash, không jq, không POSIX coreutils — chỉ cần `node` và `claude` CLI là đủ. Chạy ngon lành nguyên bản trên Linux, macOS, lẫn Windows.
+
 | Yêu cầu | Lý do |
 | --- | --- |
 | **Claude Code 2.1+** | Dùng hệ thống Stop hook và định dạng plugin marketplace |
-| **`bash`** trong `PATH` | Toàn bộ logic của hook và setup đều viết bằng POSIX bash. Windows native (PowerShell / cmd) **không hỗ trợ** — xài WSL2 hoặc Git Bash |
-| **`jq`** trong `PATH` | Stop hook dùng để parse transcript JSONL và file trạng thái JSON |
+| **`node`** 18+ trong `PATH` | Toàn bộ logic của hook và setup đều viết bằng JavaScript. `node:test` (bộ test xài cái này) yêu cầu Node 18+ |
 | **`claude` CLI** trong `PATH` | Dùng cho cú gọi phân loại Haiku headless. Phải đã xác thực (OAuth hoặc `ANTHROPIC_API_KEY`) |
-| Biến môi trường **`TERM_SESSION_ID`** | Làm khoá cho file trạng thái theo session. Đa số terminal emulator (iTerm2, WezTerm, các terminal Linux hiện đại) đều tự set. Cách khắc phục nếu chưa có: `export TERM_SESSION_ID=$(uuidgen)` trước khi chạy `claude`. |
+| Biến môi trường **`TERM_SESSION_ID`** | Làm khoá cho file trạng thái theo session. Đa số terminal emulator (iTerm2, WezTerm, các terminal Linux hiện đại) đều tự set. Cách khắc phục nếu chưa có: `export TERM_SESSION_ID=$(node -e "console.log(require('crypto').randomUUID())")` trước khi chạy `claude`. |
 
 ### Cài dependencies
+
+Nếu bạn cài Claude Code qua `npm install -g @anthropic-ai/claude-code` thì `node` đã nằm sẵn trong `PATH` rồi, khỏi phải cài gì thêm. Còn không thì:
 
 **macOS (Homebrew):**
 
 ```bash
-brew install jq
-# bash đã có sẵn; muốn xài bash 5.x mới hơn: brew install bash
+brew install node
 # claude CLI: coi https://docs.anthropic.com/claude-code
 ```
 
 **Debian / Ubuntu / WSL2:**
 
 ```bash
-sudo apt update
-sudo apt install -y bash jq uuid-runtime
-# claude CLI: coi https://docs.anthropic.com/claude-code
+# Cách 1: package của distro (có thể cũ hơn bản 18)
+sudo apt update && sudo apt install -y nodejs
+
+# Cách 2: NodeSource (LTS hiện tại)
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt install -y nodejs
 ```
 
 **Fedora / RHEL:**
 
 ```bash
-sudo dnf install -y bash jq util-linux
+sudo dnf install -y nodejs
 ```
 
 **Arch / Manjaro:**
 
 ```bash
-sudo pacman -S --needed bash jq util-linux
+sudo pacman -S --needed nodejs
 ```
 
-**Windows:**
+**Windows (PowerShell / cmd nguyên bản):**
 
-Windows native (PowerShell / cmd) **không hỗ trợ** — plugin toàn bộ là bash scripts và phần đăng ký Stop hook bắt buộc phải có POSIX shell trong `PATH`. Bạn có hai lựa chọn:
+```powershell
+# winget
+winget install OpenJS.NodeJS.LTS
 
-- **WSL2 (khuyến nghị)** — chạy Claude Code bên trong một distro WSL2. Mọi thứ chạy ngon lành luôn.
-- **Git Bash (thử nghiệm)** — cài [Git for Windows](https://git-scm.com/download/win) (nó gói sẵn bash), rồi cài thêm `jq` riêng (ví dụ qua [scoop](https://scoop.sh): `scoop install jq`). Bạn cũng sẽ phải tự tay export `TERM_SESSION_ID` trước khi chạy `claude`:
-  ```bash
-  export TERM_SESSION_ID=$(cat /proc/sys/kernel/random/uuid)
-  claude
-  ```
+# hoặc scoop
+scoop install nodejs-lts
+
+# hoặc tải installer từ https://nodejs.org
+```
+
+Khỏi cần WSL2 hay Git Bash — Watchdog 1.1.0 chạy thẳng trên Windows nguyên bản luôn.
 
 ### Hỗ trợ nền tảng
 
 | Nền tảng | Trạng thái |
 | --- | --- |
-| Linux | ✅ Đã test |
-| macOS | ✅ Chắc là chạy được (cùng POSIX primitives) |
-| WSL2 trên Windows | ✅ Đã test |
-| Git Bash trên Windows | ⚠️ Thử nghiệm, phải tự tay setup `TERM_SESSION_ID` |
-| Windows native (PowerShell / cmd) | ❌ Không hỗ trợ |
+| Linux (Node 18 / 20 / 22) | ✅ CI đã test |
+| macOS (Node 18 / 20 / 22) | ✅ CI đã test |
+| Windows (Node 18 / 20 / 22) | ✅ CI đã test (PowerShell / cmd nguyên bản, khỏi cần WSL2) |
+| WSL2 trên Windows | ✅ Chạy được (nó là Linux mà) |
 
 ---
 
@@ -367,17 +374,49 @@ claude-code-watchdog/
 │   ├── stop.md              # /watchdog:stop
 │   └── help.md              # /watchdog:help
 ├── hooks/
-│   ├── hooks.json           # đăng ký Stop hook
-│   └── stop-hook.sh         # logic lõi của vòng lặp
+│   ├── hooks.json           # đăng ký Stop hook (gọi node)
+│   └── stop-hook.js         # logic lõi của vòng lặp
 ├── scripts/
-│   ├── setup-watchdog.sh    # tạo file trạng thái
-│   └── stop-watchdog.sh     # xoá file trạng thái
-├── .gitattributes           # ép line ending là LF (cực kỳ quan trọng với shell script)
+│   ├── setup-watchdog.js    # tạo file trạng thái
+│   └── stop-watchdog.js     # xoá file trạng thái
+├── lib/                     # các module dùng chung (mọi entry point đều xài lại)
+│   ├── constants.js         # pattern đường dẫn state, marker tokens, template prompt
+│   ├── log.js               # chẩn đoán qua stderr
+│   ├── stdin.js             # reader stdin đồng bộ, đa nền tảng
+│   ├── state.js             # vòng đời file trạng thái theo kiểu atomic
+│   ├── transcript.js        # parser JSONL + trích tool của lượt hiện tại
+│   └── judge.js             # subprocess Haiku headless + parser phán quyết
+├── test/                    # unit + integration test chạy bằng node:test
+│   ├── fixtures/            # fixture transcript JSONL
+│   ├── transcript.test.js
+│   ├── state.test.js
+│   ├── judge.test.js
+│   ├── setup.test.js
+│   ├── stop-watchdog.test.js
+│   └── stop-hook.test.js
+├── .github/                 # workflow CI (shellcheck → node --test), template issue/PR
+├── .gitattributes           # ép line ending là LF
 ├── LICENSE                  # Apache License 2.0
 ├── NOTICE                   # ghi nhận nguồn ralph-loop
 ├── README.md                # file này
-└── README.zh.md             # bản dịch tiếng Trung
+└── README.{zh,ja,ko,es,vi,pt}.md  # các bản dịch
 ```
+
+## Test
+
+Watchdog 1.1.0 đi kèm 53 test tự động, chạy bằng runner `node:test` có sẵn của Node — không phải cài thêm dependency ngoài nào. Chạy từ gốc repo:
+
+```bash
+node --test 'test/*.test.js'
+```
+
+Nhắm vào một file duy nhất:
+
+```bash
+node --test test/transcript.test.js
+```
+
+CI chạy nguyên bộ test trên `ubuntu-latest`, `macos-latest`, và `windows-latest` với Node 18 / 20 / 22 cho mỗi lần push và pull request.
 
 ---
 
@@ -393,7 +432,8 @@ Watchdog giữ nguyên cơ chế cốt lõi — một Stop hook nạp lại prom
 | **Tiền đề thoát** | Phải có gọi tool **VÀ** Haiku nói `NO_FILE_CHANGES` | Chỉ cần khớp chuỗi `<promise>`. Agent có thể gian lận bằng cách phun tag ra sớm; lá chắn duy nhất của ralph-loop là một prompt nài nỉ agent đừng nói dối. |
 | **Mức độ agent thấy được** | Ẩn hoàn toàn (không systemMessage, không banner, chẩn đoán chỉ đi qua stderr) | Agent được cho biết về loop và giao thức promise |
 | **Phạm vi trạng thái** | File theo từng session, đánh khoá bằng `TERM_SESSION_ID` | Một file trạng thái duy nhất ở mức project |
-| **Định dạng file trạng thái** | JSON (parse bằng jq) | Markdown với YAML frontmatter (parse bằng sed/awk/grep) |
+| **Định dạng file trạng thái** | JSON (parse bằng `JSON.parse` native) | Markdown với YAML frontmatter (parse bằng sed/awk/grep) |
+| **Runtime** | Node.js 18+ — đa nền tảng (Linux, macOS, Windows nguyên bản) | Bash + jq + POSIX coreutils — chỉ chạy trên Unix |
 
 Xem [`NOTICE`](./NOTICE) để biết ghi nhận đầy đủ và danh sách thay đổi chi tiết.
 

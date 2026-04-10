@@ -43,7 +43,7 @@ introduces the following substantive modifications:
   - Introduced per-session state files keyed by TERM_SESSION_ID so
     concurrent watchdogs in different terminal tabs do not clobber
     each other's state. The state file format was also switched from
-    markdown-with-YAML-frontmatter to JSON, parsed with jq.
+    markdown-with-YAML-frontmatter to JSON.
 
   - Appended an English verification reminder to every re-fed prompt,
     instructing the agent to re-run the verification with real tool
@@ -54,12 +54,38 @@ introduces the following substantive modifications:
     mistaken for turn boundaries, causing the current turn's tool_use
     blocks to be excluded from the classification prompt.
 
+  - Added an owner_session_id recursion guard. The headless Haiku
+    classifier we spawn is itself a Claude Code session, so its own
+    Stop hook fires when it ends. TERM_SESSION_ID is inherited by
+    subprocesses, so the recursive invocation would find and clobber
+    the main session's state file. The fix records the per-invocation
+    Claude session_id (from the hook's stdin JSON, which is NOT
+    inherited) as owner_session_id on first fire, and recursive fires
+    with a different session_id bail out without touching state.
+
+  - Rewrote the entire plugin from Bash + jq + POSIX coreutils to
+    Node.js (v1.1.0). The new implementation has zero shell or POSIX
+    dependencies — it runs natively on Linux, macOS, and native
+    Windows (PowerShell / cmd) with only `node` 18+ required. Shared
+    logic is extracted into reusable modules under lib/ (constants,
+    state, transcript, judge, log, stdin), consumed by three thin
+    entry points (setup-watchdog.js, stop-watchdog.js, stop-hook.js).
+    The port is covered by 53 tests using Node's built-in node:test
+    runner (no external test dependencies).
+
 Files significantly modified from their ralph-loop originals include:
 
-  - hooks/stop-hook.sh
-  - scripts/setup-watchdog.sh (originally scripts/setup-ralph-loop.sh)
-  - scripts/stop-watchdog.sh  (originally scripts/cancel-ralph.sh)
+  - hooks/stop-hook.js        (was hooks/stop-hook.sh in ralph-loop
+                               and Watchdog 1.0.x)
+  - scripts/setup-watchdog.js (originally scripts/setup-ralph-loop.sh)
+  - scripts/stop-watchdog.js  (originally scripts/cancel-ralph.sh)
   - commands/start.md         (originally commands/ralph-loop.md)
   - commands/stop.md          (originally commands/cancel-ralph.md)
+  - lib/constants.js          (new in Watchdog 1.1.0)
+  - lib/state.js              (new in Watchdog 1.1.0)
+  - lib/transcript.js         (new in Watchdog 1.1.0)
+  - lib/judge.js              (new in Watchdog 1.1.0)
+  - lib/log.js                (new in Watchdog 1.1.0)
+  - lib/stdin.js              (new in Watchdog 1.1.0)
 
 See each file's header comment for a per-file attribution notice.

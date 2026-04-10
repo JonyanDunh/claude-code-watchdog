@@ -1,7 +1,7 @@
 {
   "name": "watchdog",
-  "version": "1.0.3",
-  "description": "Continuous self-referential AI watchdog for interactive iterative development. Runs Claude in a while-true loop with the same prompt until the task stops producing file edits.",
+  "version": "1.1.0",
+  "description": "Self-referential loop for Claude Code. Re-feeds the same prompt after every turn until files actually stop changing. Cross-platform Node.js implementation — no bash / jq dependencies, runs natively on Linux, macOS, and Windows.",
   "author": {
     "name": "Jonyan Dunh",
     "email": "jonyandunh@outlook.com"
@@ -17,6 +17,8 @@
     "self-referential",
     "iteration",
     "convergence",
-    "ralph-loop"
+    "ralph-loop",
+    "nodejs",
+    "cross-platform"
   ]
 }
