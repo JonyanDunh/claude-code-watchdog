@@ -60,7 +60,7 @@ Everything else is automatic. The agent never knows a loop is running.
 
 - **Zero agent cheating** — The agent is never told it is inside a loop. No `systemMessage`, no iteration counter, no setup banner. It cannot short-circuit by emitting a fake completion signal.
 - **Forced tool verification** — A pure-text turn ("I've checked, all good") never ends the loop. The agent **must** actually invoke a tool before exit is even considered.
-- **LLM-judged, project-aware file-change detection** — A headless `claude -p --model haiku` call is the **sole** judge of "did this turn modify any project file". It sees every tool invocation's full input and decides semantically.
+- **LLM-judged, project-aware file-change detection** — On every hook fire, watchdog spawns a short-lived **Claude Code subprocess** (`claude -p --model haiku`) and asks it the single question: "did this turn modify any project file?". The subprocess sees every tool invocation's full input and decides semantically. Haiku is the model — the important part is that it's an **isolated, stateless Claude Code process**, not a custom API client, so your existing `claude` authentication is reused as-is.
 - **Per-session isolation** — State file is keyed by the parent Claude Code process ID, discovered by walking the process ancestry. 100 concurrent watchdogs in the same project directory never collide.
 - **Hidden by design** — All diagnostic output goes to stderr. The JSONL transcript never leaks loop metadata into the agent's context.
 - **Apache 2.0** — Cleanly derived from Anthropic's own `ralph-loop` plugin, with full attribution in [NOTICE](./NOTICE).
@@ -99,7 +99,7 @@ The loop exits when **both** of these are true for the latest assistant turn:
 | Check | Requirement |
 | --- | --- |
 | **Tool usage precondition** | The turn must have invoked at least one tool. Pure-text turns never exit. |
-| **Haiku classifier verdict** | A headless `claude -p --model haiku` call returns `NO_FILE_CHANGES`. The classifier reads every tool invocation's full input and decides semantically whether the turn directly modified any project file. |
+| **Classifier subprocess verdict** | A short-lived Claude Code subprocess (`claude -p --model haiku`) returns `NO_FILE_CHANGES`. The subprocess reads every tool invocation's full input and decides semantically whether the turn directly modified any project file. |
 
 If either check fails, the loop continues. Additional exit paths:
 
@@ -265,7 +265,7 @@ Implement feature X using TDD:
 
 ### 4. Always set `--max-iterations`
 
-The Haiku classifier is not infallible. A stuck agent that keeps making meaningless edits, or one that gets confused and stops editing prematurely, should fall through to a hard stop. `--max-iterations 20` is a reasonable default.
+The classifier subprocess is not infallible. A stuck agent that keeps making meaningless edits, or one that gets confused and stops editing prematurely, should fall through to a hard stop. `--max-iterations 20` is a reasonable default.
 
 ---
 
@@ -289,15 +289,19 @@ The Haiku classifier is not infallible. A stuck agent that keeps making meaningl
 
 ## Requirements
 
+Watchdog needs **both `claude` and `node` in your `PATH`** — `node` runs the plugin's hook and setup scripts, and `claude` is what watchdog spawns (`claude -p --model haiku`) to judge whether each turn modified any project file.
+
 | Requirement | Why |
 | --- | --- |
 | **Claude Code 2.1+** | Uses the Stop hook system and marketplace plugin format |
 | **`node`** 18+ in `PATH` | Runtime for the plugin's hook and setup scripts |
-| **`claude` CLI** in `PATH` | Used for the headless Haiku classification call. Must be authenticated (OAuth or `ANTHROPIC_API_KEY`) |
+| **`claude` CLI** in `PATH` | Watchdog spawns a short-lived `claude -p --model haiku` subprocess on every hook fire to classify the turn. Must be authenticated (OAuth or `ANTHROPIC_API_KEY`) — the subprocess reuses your existing session credentials. |
 
 ### Install dependencies
 
-If you installed Claude Code via `npm install -g @anthropic-ai/claude-code`, you already have `node` in `PATH` and there is nothing else to install. Otherwise:
+If you installed Claude Code via `npm install -g @anthropic-ai/claude-code`, you get **both** `claude` and `node` as a package deal — the npm install adds `claude` to your `PATH`, and Node.js is npm's own runtime so it's already there. Nothing else to install.
+
+If you installed Claude Code some other way (standalone binary, Homebrew, Windows installer), `claude` is already in your `PATH` but you may need to install Node.js 18+ separately:
 
 **macOS (Homebrew):**
 
@@ -376,7 +380,7 @@ claude-code-watchdog/
 │   ├── stdin.js             # sync stdin reader
 │   ├── state.js             # atomic state file lifecycle
 │   ├── transcript.js        # JSONL parser + current-turn tool extraction
-│   ├── judge.js             # headless Haiku subprocess + verdict parser
+│   ├── judge.js             # Claude Code classifier subprocess + verdict parser
 │   └── claude-pid.js        # process ancestry walk
 ├── test/                    # node:test unit + integration tests
 │   ├── fixtures/            # transcript JSONL fixtures
@@ -404,8 +408,8 @@ Watchdog keeps the core mechanic — a Stop hook that re-feeds the prompt — an
 
 | | Watchdog | ralph-loop |
 | --- | --- | --- |
-| **Exit trigger** | Headless Haiku classifier is the **sole** judge. It reads every tool invocation's full input and decides semantically whether any project file was directly modified. | The agent must emit a `<promise>…</promise>` XML tag in its final text. The phrase inside the tags is configurable via `--completion-promise "…"` (e.g. `COMPLETE`, `DONE`). A Stop hook grep matches the exact string. |
-| **Exit precondition** | Tools must have been called **AND** Haiku says `NO_FILE_CHANGES` | Just the `<promise>` text match. The agent can cheat by emitting the tag prematurely; ralph-loop's only defense is a prompt that asks the agent not to lie. |
+| **Exit trigger** | A short-lived Claude Code subprocess (`claude -p --model haiku`) is the **sole** judge. It reads every tool invocation's full input and decides semantically whether any project file was directly modified. | The agent must emit a `<promise>…</promise>` XML tag in its final text. The phrase inside the tags is configurable via `--completion-promise "…"` (e.g. `COMPLETE`, `DONE`). A Stop hook grep matches the exact string. |
+| **Exit precondition** | Tools must have been called **AND** the classifier subprocess says `NO_FILE_CHANGES` | Just the `<promise>` text match. The agent can cheat by emitting the tag prematurely; ralph-loop's only defense is a prompt that asks the agent not to lie. |
 | **Agent visibility** | Completely hidden (no systemMessage, no banner, stderr-only diagnostics) | Agent is told about the loop and the promise protocol |
 | **State scoping** | One state file per Claude Code session — unlimited concurrent watchdogs in the same project | One state file per project — only ONE ralph-loop can run per project at a time |
 | **State file format** | JSON (parsed with native `JSON.parse`) | Markdown with YAML frontmatter (parsed with sed/awk/grep) |
