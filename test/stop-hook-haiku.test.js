@@ -100,25 +100,25 @@ after(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
+let pidCounter = 600000;
 function makeSession() {
   const cwd = fs.mkdtempSync(path.join(tmpRoot, 'session-'));
-  const termSessionId = `e2e-${path.basename(cwd)}`;
-  return { cwd, termSessionId };
+  const claudePid = ++pidCounter;
+  return { cwd, claudePid };
 }
 
-function writeStateFile(cwd, termSessionId, overrides = {}) {
+function writeStateFile(cwd, claudePid, overrides = {}) {
   const dir = path.join(cwd, '.claude');
   fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `watchdog.${termSessionId}.local.json`);
+  const filePath = path.join(dir, `watchdog.claudepid.${claudePid}.local.json`);
   const state = Object.assign(
     {
       active: true,
       iteration: 1,
       max_iterations: 10,
-      term_session_id: termSessionId,
+      claude_pid: claudePid,
       started_at: '2026-04-11T00:00:00Z',
       prompt: 'my test prompt',
-      owner_session_id: 'OWNER',
     },
     overrides
   );
@@ -203,14 +203,14 @@ describe('stop-hook.js: Haiku subprocess integration (mock CLI)', () => {
   });
 
   test('FILE_CHANGES verdict => block and re-feed', () => {
-    const { cwd, termSessionId } = makeSession();
+    const { cwd, claudePid } = makeSession();
     const transcript = writeTranscriptWithToolUse(cwd);
-    const stateFile = writeStateFile(cwd, termSessionId, { iteration: 1 });
+    const stateFile = writeStateFile(cwd, claudePid, { iteration: 1 });
 
     const result = runHook(
       cwd,
       { session_id: 'OWNER', transcript_path: transcript },
-      { TERM_SESSION_ID: termSessionId, WATCHDOG_FAKE_HAIKU_VERDICT: 'FILE_CHANGES' }
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'FILE_CHANGES' }
     );
 
     assert.equal(result.status, 0, `hook stderr: ${result.stderr}`);
@@ -225,14 +225,14 @@ describe('stop-hook.js: Haiku subprocess integration (mock CLI)', () => {
   });
 
   test('NO_FILE_CHANGES verdict => remove state file, allow stop', () => {
-    const { cwd, termSessionId } = makeSession();
+    const { cwd, claudePid } = makeSession();
     const transcript = writeTranscriptWithToolUse(cwd);
-    const stateFile = writeStateFile(cwd, termSessionId, { iteration: 5 });
+    const stateFile = writeStateFile(cwd, claudePid, { iteration: 5 });
 
     const result = runHook(
       cwd,
       { session_id: 'OWNER', transcript_path: transcript },
-      { TERM_SESSION_ID: termSessionId, WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
     );
 
     assert.equal(result.status, 0);
@@ -242,14 +242,14 @@ describe('stop-hook.js: Haiku subprocess integration (mock CLI)', () => {
   });
 
   test('ambiguous (neither marker) => continue loop as safety', () => {
-    const { cwd, termSessionId } = makeSession();
+    const { cwd, claudePid } = makeSession();
     const transcript = writeTranscriptWithToolUse(cwd);
-    const stateFile = writeStateFile(cwd, termSessionId, { iteration: 3 });
+    const stateFile = writeStateFile(cwd, claudePid, { iteration: 3 });
 
     const result = runHook(
       cwd,
       { session_id: 'OWNER', transcript_path: transcript },
-      { TERM_SESSION_ID: termSessionId, WATCHDOG_FAKE_HAIKU_VERDICT: 'AMBIGUOUS_NEITHER' }
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'AMBIGUOUS_NEITHER' }
     );
 
     assert.equal(result.status, 0);
@@ -262,14 +262,14 @@ describe('stop-hook.js: Haiku subprocess integration (mock CLI)', () => {
   });
 
   test('ambiguous (both markers) => continue loop as safety', () => {
-    const { cwd, termSessionId } = makeSession();
+    const { cwd, claudePid } = makeSession();
     const transcript = writeTranscriptWithToolUse(cwd);
-    writeStateFile(cwd, termSessionId, { iteration: 2 });
+    writeStateFile(cwd, claudePid, { iteration: 2 });
 
     const result = runHook(
       cwd,
       { session_id: 'OWNER', transcript_path: transcript },
-      { TERM_SESSION_ID: termSessionId, WATCHDOG_FAKE_HAIKU_VERDICT: 'AMBIGUOUS_BOTH' }
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'AMBIGUOUS_BOTH' }
     );
 
     assert.equal(result.status, 0);
@@ -279,14 +279,14 @@ describe('stop-hook.js: Haiku subprocess integration (mock CLI)', () => {
   });
 
   test('CLI failure (exit 1) => continue loop as safety', () => {
-    const { cwd, termSessionId } = makeSession();
+    const { cwd, claudePid } = makeSession();
     const transcript = writeTranscriptWithToolUse(cwd);
-    const stateFile = writeStateFile(cwd, termSessionId, { iteration: 1 });
+    const stateFile = writeStateFile(cwd, claudePid, { iteration: 1 });
 
     const result = runHook(
       cwd,
       { session_id: 'OWNER', transcript_path: transcript },
-      { TERM_SESSION_ID: termSessionId, WATCHDOG_FAKE_HAIKU_VERDICT: 'FAIL' }
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'FAIL' }
     );
 
     assert.equal(result.status, 0);

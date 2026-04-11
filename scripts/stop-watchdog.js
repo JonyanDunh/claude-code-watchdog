@@ -11,16 +11,21 @@
 
 const { error } = require('../lib/log');
 const { getStateFilePath, exists, read, remove } = require('../lib/state');
+const { findClaudePid } = require('../lib/claude-pid');
 
 function main() {
-  const termSessionId = process.env.TERM_SESSION_ID;
-  if (!termSessionId) {
-    error('TERM_SESSION_ID is not set in the environment');
-    process.stderr.write('   Cannot locate the per-session state file without a terminal UUID.\n');
+  // Same ancestry walk as setup — finds THIS session's Claude Code PID so we
+  // target exactly the right state file. Concurrent sessions in the same
+  // project directory are cleanly isolated: /watchdog:stop in one session
+  // never touches another session's state file.
+  const claudePid = findClaudePid();
+  if (!claudePid) {
+    error('Could not find the Claude Code process in this script\'s ancestry');
+    process.stderr.write('   Cannot locate this session\'s state file without its Claude Code PID.\n');
     process.exit(1);
   }
 
-  const filePath = getStateFilePath(process.cwd(), termSessionId);
+  const filePath = getStateFilePath(process.cwd(), claudePid);
 
   if (!exists(filePath)) {
     process.stdout.write('No active watchdog for this session.\n');

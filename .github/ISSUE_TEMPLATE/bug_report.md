@@ -18,11 +18,11 @@ assignees: JonyanDunh
 
 ## Environment
 
+- Watchdog version (from `.claude-plugin/plugin.json`):
 - Claude Code version: `claude --version` → 
+- Node.js version: `node --version` → 
 - OS:
-- Terminal emulator (iTerm2 / WezTerm / Windows Terminal / ...):
-- `TERM_SESSION_ID` is set? (`echo $TERM_SESSION_ID`):
-- `jq` version: `jq --version` → 
+- Terminal emulator (Windows Terminal / macOS Terminal.app / GNOME Terminal / iTerm2 / WezTerm / JetBrains / tmux / ...):
 - `claude` CLI available for Haiku calls? (`which claude`):
 
 ## Relevant logs

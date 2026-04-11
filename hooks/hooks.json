@@ -1,5 +1,5 @@
 {
-  "description": "Watchdog plugin stop hook for self-referential loops (Node.js cross-platform implementation)",
+  "description": "Watchdog plugin stop hook for self-referential loops",
   "hooks": {
     "Stop": [
       {

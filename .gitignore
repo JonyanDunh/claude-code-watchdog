@@ -1,1 +1,8 @@
 .idea
+
+# Per-user Claude Code config + per-session watchdog state files. The
+# plugin writes state to .claude/watchdog.claudepid.<PID>.local.json and
+# users may also drop their own .claude/settings.json here when testing
+# the plugin against a local marketplace. None of this should ever land
+# in the repo.
+.claude/

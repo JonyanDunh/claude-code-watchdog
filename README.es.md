@@ -4,7 +4,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1%2B-7C4DFF.svg)](https://docs.anthropic.com/claude-code)
-[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](./.claude-plugin/plugin.json)
 [![GitHub stars](https://img.shields.io/github/stars/JonyanDunh/claude-code-watchdog?style=flat&color=yellow)](https://github.com/JonyanDunh/claude-code-watchdog/stargazers)
 [![Inspired by ralph-loop](https://img.shields.io/badge/Inspired%20by-ralph--loop-orange.svg)](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop)
 
@@ -61,7 +61,7 @@ Todo lo demás es automático. El agent nunca se entera de que hay un bucle corr
 - **Cero trampas del agent** — Al agent nunca se le dice que está dentro de un bucle. Sin `systemMessage`, sin contador de iteraciones, sin banner de arranque. No puede atajar emitiendo una señal de completado falsa.
 - **Verificación con herramientas obligatoria** — Un turno de puro texto ("Lo he revisado, todo bien") jamás termina el bucle. El agent **tiene que** invocar una herramienta de verdad antes de que siquiera se plantee la salida.
 - **Detección de cambios de archivos juzgada por un LLM y consciente del proyecto** — Una llamada headless a `claude -p --model haiku` es el **único** juez de "¿este turno modificó algún archivo del proyecto?". Ve la entrada completa de cada invocación de herramienta y decide semánticamente.
-- **Aislamiento por sesión** — El archivo de estado se indexa por `TERM_SESSION_ID`, así que lanzar varios watchdogs en distintas pestañas de terminal nunca choca.
+- **Aislamiento por sesión** — El archivo de estado se indexa por el ID del proceso padre de Claude Code, descubierto recorriendo la ascendencia de procesos. 100 watchdogs concurrentes en el mismo directorio de proyecto nunca chocan.
 - **Oculto por diseño** — Toda la salida de diagnóstico va a stderr. El transcript JSONL nunca filtra metadatos del bucle al contexto del agent.
 - **Apache 2.0** — Derivado de forma limpia del propio plugin `ralph-loop` de Anthropic, con la atribución completa en [NOTICE](./NOTICE).
 
@@ -121,38 +121,35 @@ Si alguna de las dos falla, el bucle continúa. Rutas de salida adicionales:
 
 ## Archivo de estado
 
-El estado por sesión vive en `.claude/watchdog.<TERM_SESSION_ID>.local.json`:
+El estado por sesión vive en `.claude/watchdog.claudepid.<PID>.local.json`, donde `<PID>` es el ID del proceso padre de Claude Code descubierto recorriendo la ascendencia de procesos. Ejemplo:
 
 ```json
 {
   "active": true,
   "iteration": 3,
   "max_iterations": 20,
-  "term_session_id": "c387e44a-afcd-4c0d-95da-5dc7cd2d8b22",
-  "started_at": "2026-04-10T12:00:00Z",
+  "claude_pid": 1119548,
+  "started_at": "2026-04-11T12:00:00Z",
   "prompt": "Fix the flaky auth tests..."
 }
 ```
 
-Cada sesión tiene su propio archivo, indexado por `TERM_SESSION_ID`. Lanzar varios watchdogs en distintas pestañas de terminal funciona sin conflictos.
+Cada sesión de Claude Code tiene un PID distinto, así que **100 watchdogs concurrentes en el mismo directorio de proyecto nunca chocan** — cada uno tiene su propio archivo de estado, y `/watchdog:stop` en cualquiera de ellos solo cancela el bucle de esa sesión concreta.
 
 **Monitorizar los watchdogs activos:**
 
 ```bash
 # Lista todos los archivos de estado por sesión activos en este proyecto
-ls .claude/watchdog.*.local.json
+ls .claude/watchdog.claudepid.*.local.json
 
-# Iteración actual de una sesión concreta
-jq .iteration .claude/watchdog.<SESSION_ID>.local.json
-
-# Estado completo
-jq . .claude/watchdog.<SESSION_ID>.local.json
+# Inspecciona uno con jq o node
+node -e "console.log(JSON.parse(require('fs').readFileSync('.claude/watchdog.claudepid.<PID>.local.json','utf8')))"
 ```
 
 **Matar manualmente todo lo que haya en este proyecto:**
 
 ```bash
-rm -f .claude/watchdog.*.local.json
+rm -f .claude/watchdog.claudepid.*.local.json
 ```
 
 ---
@@ -292,14 +289,11 @@ El clasificador Haiku no es infalible. Un agent atascado que no para de hacer ed
 
 ## Requisitos
 
-Watchdog 1.1.0 es una **reescritura en Node.js**. Nada de bash, nada de jq, nada de POSIX coreutils — solo necesitas `node` y el `claude` CLI. Corre de forma nativa en Linux, macOS y Windows.
-
 | Requisito | Por qué |
 | --- | --- |
 | **Claude Code 2.1+** | Usa el sistema de `Stop hook` y el formato de plugin del marketplace |
-| **`node`** 18+ en el `PATH` | Toda la lógica de los hooks y del setup está escrita en JavaScript. `node:test` (que usa la suite de tests) requiere Node 18+ |
+| **`node`** 18+ en el `PATH` | Runtime de los hooks y scripts de setup del plugin |
 | **`claude` CLI** en el `PATH` | Se usa para la llamada headless de clasificación con Haiku. Tiene que estar autenticado (OAuth o `ANTHROPIC_API_KEY`) |
-| Variable de entorno **`TERM_SESSION_ID`** | Indexa el archivo de estado por sesión. La definen la mayoría de emuladores de terminal (iTerm2, WezTerm, terminales modernas de Linux). Workaround si no está definida: `export TERM_SESSION_ID=$(node -e "console.log(require('crypto').randomUUID())")` antes de lanzar `claude`. |
 
 ### Instalar dependencias
 
@@ -347,16 +341,13 @@ scoop install nodejs-lts
 # o bájate el instalador desde https://nodejs.org
 ```
 
-No hace falta WSL2 ni Git Bash — Watchdog 1.1.0 corre directo en Windows nativo.
-
 ### Soporte de plataformas
 
 | Plataforma | Estado |
 | --- | --- |
 | Linux (Node 18 / 20 / 22) | ✅ Probado en CI |
 | macOS (Node 18 / 20 / 22) | ✅ Probado en CI |
-| Windows (Node 18 / 20 / 22) | ✅ Probado en CI (PowerShell / cmd nativo, sin WSL2) |
-| WSL2 en Windows | ✅ Funciona (es Linux) |
+| Windows (Node 18 / 20 / 22) | ✅ Probado en CI |
 
 ---
 
@@ -382,18 +373,21 @@ claude-code-watchdog/
 ├── lib/                     # módulos compartidos (reutilizados por todos los entry points)
 │   ├── constants.js         # patrón del path del estado, tokens marcadores, plantillas de prompt
 │   ├── log.js               # diagnósticos por stderr
-│   ├── stdin.js             # lector síncrono de stdin cross-platform
+│   ├── stdin.js             # lector síncrono de stdin
 │   ├── state.js             # ciclo de vida atómico del archivo de estado
 │   ├── transcript.js        # parser JSONL + extracción de herramientas del turno actual
-│   └── judge.js             # subproceso headless de Haiku + parser del veredicto
+│   ├── judge.js             # subproceso headless de Haiku + parser del veredicto
+│   └── claude-pid.js        # recorrido de la ascendencia de procesos
 ├── test/                    # tests unitarios + de integración con node:test
 │   ├── fixtures/            # fixtures JSONL de transcripts
 │   ├── transcript.test.js
 │   ├── state.test.js
 │   ├── judge.test.js
+│   ├── claude-pid.test.js
 │   ├── setup.test.js
 │   ├── stop-watchdog.test.js
-│   └── stop-hook.test.js
+│   ├── stop-hook.test.js
+│   └── stop-hook-haiku.test.js
 ├── .github/                 # workflow de CI (matriz node --test, jsonlint, markdownlint) + plantillas de issue/PR
 ├── .gitattributes           # fuerza los finales de línea LF
 ├── LICENSE                  # Apache License 2.0
@@ -401,32 +395,6 @@ claude-code-watchdog/
 ├── README.md                # este archivo
 └── README.{zh,ja,ko,es,vi,pt}.md  # traducciones
 ```
-
-## Tests
-
-Watchdog 1.1.0 viene con 59 tests automatizados usando el runner `node:test` integrado de Node — sin dependencias externas. Lánzalos desde la raíz del repo.
-
-**Node 22+:**
-
-```bash
-node --test 'test/*.test.js'
-```
-
-**Node 18 / 20** (el soporte de globs se añadió en Node 21, así que o dejas que tu shell expanda el patrón, o listas los archivos a mano):
-
-```bash
-node --test test/*.test.js
-```
-
-Ejecuta solo un archivo:
-
-```bash
-node --test test/transcript.test.js
-```
-
-El CI corre la suite completa en `ubuntu-latest`, `macos-latest` y `windows-latest` con Node 18 / 20 / 22 en cada push y pull request.
-
----
 
 ## Inspirado en
 
@@ -439,9 +407,9 @@ Watchdog mantiene el mecanismo central — un `Stop hook` que vuelve a inyectar 
 | **Disparador de salida** | El clasificador headless con Haiku es el **único** juez. Lee la entrada completa de cada invocación de herramienta y decide semánticamente si se modificó directamente algún archivo del proyecto. | El agent tiene que emitir una etiqueta XML `<promise>…</promise>` en su texto final. La frase dentro de las etiquetas es configurable vía `--completion-promise "…"` (por ejemplo `COMPLETE`, `DONE`). Un grep en el `Stop hook` busca la cadena exacta. |
 | **Precondición de salida** | Hay que haber llamado a herramientas **Y** que Haiku diga `NO_FILE_CHANGES` | Basta con que coincida el texto del `<promise>`. El agent puede hacer trampa emitiendo la etiqueta antes de tiempo; la única defensa de ralph-loop es un prompt que le pide al agent que no mienta. |
 | **Visibilidad para el agent** | Completamente oculto (sin systemMessage, sin banner, diagnósticos solo por stderr) | Al agent se le informa del bucle y del protocolo del promise |
-| **Ámbito del estado** | Archivo por sesión, indexado por `TERM_SESSION_ID` | Archivo único de estado a nivel de proyecto |
+| **Ámbito del estado** | Un archivo de estado por cada sesión de Claude Code — sin límite de watchdogs concurrentes en el mismo proyecto | Un solo archivo de estado por proyecto — solo UN ralph-loop puede correr por proyecto a la vez |
 | **Formato del archivo de estado** | JSON (parseado con `JSON.parse` nativo) | Markdown con frontmatter YAML (parseado con sed/awk/grep) |
-| **Runtime** | Node.js 18+ — cross-platform (Linux, macOS, Windows nativo) | Bash + jq + POSIX coreutils — solo Unix |
+| **Runtime** | Node.js 18+ | Bash + jq + POSIX coreutils |
 
 Ver [`NOTICE`](./NOTICE) para la atribución completa y el listado detallado de modificaciones.
 

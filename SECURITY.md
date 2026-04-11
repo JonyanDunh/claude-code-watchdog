@@ -27,8 +27,8 @@ I will acknowledge your report within 7 days and aim to publish a fix within 30 
 The Watchdog plugin runs as a set of bash scripts triggered by Claude Code hooks. In-scope issues include:
 
 - **Command injection** via unescaped user input (prompts, state file contents, hook input JSON)
-- **Path traversal** via malicious `TERM_SESSION_ID` values or state file names
-- **State file manipulation** that bypasses the `owner_session_id` recursion guard
+- **State file path manipulation** via the per-session key (the parent Claude Code PID). The key is parsed as a positive integer before use, so classic path traversal is not possible, but any new code path that bypasses that validation would be in scope.
+- **Recursion / isolation bypass** where a subprocess's Stop hook could mutate a different session's state file
 - **Privilege escalation** via the headless Claude CLI classifier call
 
 Out of scope:

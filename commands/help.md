@@ -10,8 +10,6 @@ Please explain the following to the user in clear, friendly language. Do not dum
 
 Watchdog is a self-referential loop for Claude Code. You give it a prompt once, and it re-feeds that same prompt to Claude after every turn until the task genuinely stops producing file edits. The agent is not told a loop is running, so it cannot fake a completion signal to escape early.
 
-**This is the 1.1.0 Node.js rewrite** — no bash, no jq, no POSIX dependencies. Runs natively on Linux, macOS, and Windows, with `node` as the only runtime requirement.
-
 **Core mechanic:**
 
 1. You run `/watchdog:start "<prompt>" [--max-iterations N]`
@@ -46,7 +44,7 @@ Start a Watchdog in the current session.
 
 **Behavior:**
 
-1. Creates `.claude/watchdog.<TERM_SESSION_ID>.local.json` as the per-session state file
+1. Creates `.claude/watchdog.claudepid.<PID>.local.json` as the per-session state file (keyed by the parent Claude Code process ID, discovered automatically)
 2. Claude works on the task
 3. On turn end, the Stop hook runs the Haiku classifier
 4. If files were modified, the original prompt is re-fed as a new user turn
@@ -73,18 +71,15 @@ A pure-text turn (no tool calls at all) never exits the loop — the agent must 
 
 ## Per-session isolation
 
-The state file is keyed by `TERM_SESSION_ID` (the UUID your terminal emulator exports), so two Watchdogs running in two terminal tabs of the same repo do not collide.
+The state file is keyed by the **parent Claude Code process ID**, which Watchdog discovers by walking up the process ancestry from its own `process.ppid`. Every Claude Code session has a distinct PID, so concurrent Watchdogs in the same project directory never collide — even if you run 100 of them at once. No `TERM_SESSION_ID` required: this works on every terminal (Windows Terminal, macOS Terminal.app, GNOME Terminal, Alacritty, tmux, JetBrains, iTerm2, WezTerm, plain ttys, etc.).
 
-## Requirements (1.1.0)
+## Requirements (1.2.0)
 
 | Requirement | Why |
 | --- | --- |
 | **Claude Code 2.1+** | Uses the Stop hook system and marketplace plugin format |
 | **`node`** in `PATH` | All hook and setup logic is JavaScript, runs on Node 18+. Built-in `--test` runner is used for the test suite. |
 | **`claude` CLI** in `PATH` | Used for the headless Haiku classification call. Must be authenticated. |
-| **`TERM_SESSION_ID`** env var | Keys the per-session state file. If your terminal doesn't export one, run `export TERM_SESSION_ID=$(node -e "console.log(require('crypto').randomUUID())")` before launching `claude`. |
-
-**No bash. No jq.** This version runs natively on Windows PowerShell / cmd.
 
 ## Prompt writing tips
 
