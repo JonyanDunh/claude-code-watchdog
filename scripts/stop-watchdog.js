@@ -9,7 +9,7 @@
 // Copyright Anthropic, PBC. Licensed under the Apache License, Version 2.0.
 // Node.js rewrite by Jonyan Dunh, 2026.
 
-const { error } = require('../lib/log');
+const { error, debug } = require('../lib/log');
 const { getStateFilePath, exists, read, remove } = require('../lib/state');
 const { findClaudePid } = require('../lib/claude-pid');
 
@@ -26,8 +26,10 @@ function main() {
   }
 
   const filePath = getStateFilePath(process.cwd(), claudePid);
+  debug(`stop-watchdog.js: targeting state file ${filePath} (claudePid=${claudePid})`);
 
   if (!exists(filePath)) {
+    debug('stop-watchdog.js: state file does not exist');
     process.stdout.write('No active watchdog for this session.\n');
     process.exit(0);
   }
@@ -37,6 +39,7 @@ function main() {
   const iter = state && Number.isInteger(state.iteration) ? state.iteration : '?';
 
   remove(filePath);
+  debug(`stop-watchdog.js: removed state file at iteration ${iter}`);
   process.stdout.write(`Cancelled watchdog (was at iteration ${iter}).\n`);
   process.exit(0);
 }

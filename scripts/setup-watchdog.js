@@ -12,7 +12,7 @@
 // coreutils with a single cross-platform Node file. See NOTICE at the
 // repo root for the full change list.
 
-const { error } = require('../lib/log');
+const { error, debug } = require('../lib/log');
 const { create } = require('../lib/state');
 const { findClaudePid } = require('../lib/claude-pid');
 
@@ -107,12 +107,15 @@ function main() {
     process.exit(1);
   }
 
-  create({
+  const { filePath } = create({
     cwd: process.cwd(),
     claudePid,
     prompt,
     maxIterations: parsed.maxIterations,
   });
+  debug(
+    `setup-watchdog.js: created state file ${filePath} — claudePid=${claudePid}, max=${parsed.maxIterations}, prompt_head='${prompt.slice(0, 60)}'`
+  );
 
   // Output ONLY the user's prompt to stdout. Everything Claude Code captures
   // from stdout becomes the first user turn of the loop, and the agent must

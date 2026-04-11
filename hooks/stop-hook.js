@@ -27,7 +27,7 @@
 // See the NOTICE file at the repo root for a full summary of changes.
 
 const { readStdinSync } = require('../lib/stdin');
-const { info, warn, success, stop } = require('../lib/log');
+const { info, warn, success, stop, debug } = require('../lib/log');
 const {
   getStateFilePath,
   exists,
@@ -57,14 +57,21 @@ function blockAndRefeed(prompt) {
 }
 
 function main() {
+  const t0 = Date.now();
+  debug(`stop-hook.js entry — pid=${process.pid}, ppid=${process.ppid}, cwd=${process.cwd()}`);
+
   // 0. Find THIS session's Claude Code PID by walking process ancestry.
   //    This is our state-file naming key. If we can't find it (extremely
   //    unusual — should only happen outside a real Claude Code session),
   //    there is nothing we can safely act on, so allow the stop.
   const claudePid = findClaudePid();
-  if (!claudePid) allowStop();
+  if (!claudePid) {
+    debug('stop-hook.js: findClaudePid returned null, allowing stop');
+    allowStop();
+  }
 
   const stateFile = getStateFilePath(process.cwd(), claudePid);
+  debug(`stop-hook.js: stateFile=${stateFile}`);
 
   // 1. No state file => no active watchdog for this Claude Code session
   //    => allow. This is also the natural recursion guard: when our
@@ -72,7 +79,10 @@ function main() {
   //    fires, its findClaudePid() returns the HAIKU subprocess's PID
   //    (not the main session's), so the lookup below misses and the
   //    recursive hook exits silently without touching anything.
-  if (!exists(stateFile)) allowStop();
+  if (!exists(stateFile)) {
+    debug('stop-hook.js: no state file for this claudePid, allowing stop (likely Haiku recursion)');
+    allowStop();
+  }
 
   const state = read(stateFile);
   if (!isValid(state)) {
@@ -80,6 +90,9 @@ function main() {
     remove(stateFile);
     allowStop();
   }
+  debug(
+    `stop-hook.js: state loaded — iteration=${state.iteration}, max=${state.max_iterations}, prompt_head='${(state.prompt || '').slice(0, 60)}'`
+  );
 
   // 2. Read hook input (JSON piped in on stdin by Claude Code).
   let hookInput;
@@ -109,6 +122,9 @@ function main() {
   let toolUses;
   try {
     toolUses = currentTurnToolUses(transcriptPath);
+    debug(
+      `stop-hook.js: extracted ${toolUses.length} tool_use entries from transcript — ${toolUses.map((t) => t.tool).join(', ')}`
+    );
   } catch (err) {
     if (err.code === 'TRANSCRIPT_NOT_FOUND') {
       warn('Transcript file not found');
@@ -169,6 +185,7 @@ function main() {
     allowStop();
   }
 
+  debug(`stop-hook.js: total hook latency ${Date.now() - t0}ms, decision=block (continue loop)`);
   blockAndRefeed(state.prompt);
 }
 
