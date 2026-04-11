@@ -1,5 +1,7 @@
 ---
 description: "Explain Watchdog plugin and available commands"
+argument-hint: ""
+disable-model-invocation: true
 ---
 
 # Watchdog Plugin Help

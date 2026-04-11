@@ -1,8 +1,8 @@
 ---
 description: "Start Watchdog in current session"
-argument-hint: "PROMPT [--max-iterations N]"
+argument-hint: "\"<PROMPT>\" [--max-iterations N]"
 allowed-tools: ["Bash(node:*)"]
-hide-from-slash-command-tool: "true"
+disable-model-invocation: true
 ---
 
 ```!
