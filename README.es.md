@@ -60,7 +60,7 @@ Todo lo demás es automático. El agent nunca se entera de que hay un bucle corr
 
 - **Cero trampas del agent** — Al agent nunca se le dice que está dentro de un bucle. Sin `systemMessage`, sin contador de iteraciones, sin banner de arranque. No puede atajar emitiendo una señal de completado falsa.
 - **Verificación con herramientas obligatoria** — Un turno de puro texto ("Lo he revisado, todo bien") jamás termina el bucle. El agent **tiene que** invocar una herramienta de verdad antes de que siquiera se plantee la salida.
-- **Detección de cambios de archivos juzgada por un LLM y consciente del proyecto** — Una llamada headless a `claude -p --model haiku` es el **único** juez de "¿este turno modificó algún archivo del proyecto?". Ve la entrada completa de cada invocación de herramienta y decide semánticamente.
+- **Detección de cambios de archivos juzgada por un LLM y consciente del proyecto** — En cada disparo del hook, watchdog lanza un **subproceso de Claude Code** de vida corta (`claude -p --model haiku`) y le hace una única pregunta: "¿este turno modificó algún archivo del proyecto?". El subproceso ve la entrada completa de cada invocación de herramienta y decide semánticamente. Haiku es el modelo — lo importante es que se trata de un **proceso de Claude Code aislado y sin estado**, no de un cliente API a medida, así que tu autenticación de `claude` actual se reutiliza tal cual.
 - **Aislamiento por sesión** — El archivo de estado se indexa por el ID del proceso padre de Claude Code, descubierto recorriendo la ascendencia de procesos. 100 watchdogs concurrentes en el mismo directorio de proyecto nunca chocan.
 - **Oculto por diseño** — Toda la salida de diagnóstico va a stderr. El transcript JSONL nunca filtra metadatos del bucle al contexto del agent.
 - **Apache 2.0** — Derivado de forma limpia del propio plugin `ralph-loop` de Anthropic, con la atribución completa en [NOTICE](./NOTICE).
@@ -99,7 +99,7 @@ El bucle sale cuando **ambas** cosas son ciertas para el último turno del asist
 | Comprobación | Requisito |
 | --- | --- |
 | **Precondición de uso de herramientas** | El turno tiene que haber invocado al menos una herramienta. Los turnos de puro texto nunca salen. |
-| **Veredicto del clasificador Haiku** | Una llamada headless a `claude -p --model haiku` devuelve `NO_FILE_CHANGES`. El clasificador lee la entrada completa de cada invocación de herramienta y decide semánticamente si el turno modificó directamente algún archivo del proyecto. |
+| **Veredicto del subproceso clasificador** | Un subproceso de Claude Code de vida corta (`claude -p --model haiku`) devuelve `NO_FILE_CHANGES`. El subproceso lee la entrada completa de cada invocación de herramienta y decide semánticamente si el turno modificó directamente algún archivo del proyecto. |
 
 Si alguna de las dos falla, el bucle continúa. Rutas de salida adicionales:
 
@@ -265,7 +265,7 @@ Implementa la feature X usando TDD:
 
 ### 4. Siempre define `--max-iterations`
 
-El clasificador Haiku no es infalible. Un agent atascado que no para de hacer ediciones sin sentido, o uno que se confunde y deja de editar antes de tiempo, debería caer en un tope duro. `--max-iterations 20` es un valor por defecto razonable.
+El subproceso clasificador no es infalible. Un agent atascado que no para de hacer ediciones sin sentido, o uno que se confunde y deja de editar antes de tiempo, debería caer en un tope duro. `--max-iterations 20` es un valor por defecto razonable.
 
 ---
 
@@ -289,15 +289,19 @@ El clasificador Haiku no es infalible. Un agent atascado que no para de hacer ed
 
 ## Requisitos
 
+Watchdog necesita **tanto `claude` como `node` en tu `PATH`** — `node` ejecuta el hook y los scripts de setup del plugin, y `claude` es lo que watchdog lanza (`claude -p --model haiku`) para juzgar si cada turno modificó algún archivo del proyecto.
+
 | Requisito | Por qué |
 | --- | --- |
 | **Claude Code 2.1+** | Usa el sistema de `Stop hook` y el formato de plugin del marketplace |
 | **`node`** 18+ en el `PATH` | Runtime de los hooks y scripts de setup del plugin |
-| **`claude` CLI** en el `PATH` | Se usa para la llamada headless de clasificación con Haiku. Tiene que estar autenticado (OAuth o `ANTHROPIC_API_KEY`) |
+| **`claude` CLI** en el `PATH` | Watchdog lanza un subproceso `claude -p --model haiku` de vida corta en cada disparo del hook para clasificar el turno. Tiene que estar autenticado (OAuth o `ANTHROPIC_API_KEY`) — el subproceso reutiliza las credenciales de sesión que ya tienes. |
 
 ### Instalar dependencias
 
-Si instalaste Claude Code vía `npm install -g @anthropic-ai/claude-code`, ya tienes `node` en el `PATH` y no hace falta instalar nada más. Si no:
+Si instalaste Claude Code vía `npm install -g @anthropic-ai/claude-code`, te llevas `claude` y `node` **de paquete** — el install por npm mete `claude` en tu `PATH`, y Node.js es el propio runtime de npm, así que ya lo tienes. No hace falta instalar nada más.
+
+Si instalaste Claude Code por otra vía (binario standalone, Homebrew, instalador de Windows), `claude` ya está en tu `PATH` pero puede que tengas que instalar Node.js 18+ por tu cuenta:
 
 **macOS (Homebrew):**
 
@@ -376,7 +380,7 @@ claude-code-watchdog/
 │   ├── stdin.js             # lector síncrono de stdin
 │   ├── state.js             # ciclo de vida atómico del archivo de estado
 │   ├── transcript.js        # parser JSONL + extracción de herramientas del turno actual
-│   ├── judge.js             # subproceso headless de Haiku + parser del veredicto
+│   ├── judge.js             # subproceso clasificador de Claude Code + parser del veredicto
 │   └── claude-pid.js        # recorrido de la ascendencia de procesos
 ├── test/                    # tests unitarios + de integración con node:test
 │   ├── fixtures/            # fixtures JSONL de transcripts
@@ -404,8 +408,8 @@ Watchdog mantiene el mecanismo central — un `Stop hook` que vuelve a inyectar 
 
 | | Watchdog | ralph-loop |
 | --- | --- | --- |
-| **Disparador de salida** | El clasificador headless con Haiku es el **único** juez. Lee la entrada completa de cada invocación de herramienta y decide semánticamente si se modificó directamente algún archivo del proyecto. | El agent tiene que emitir una etiqueta XML `<promise>…</promise>` en su texto final. La frase dentro de las etiquetas es configurable vía `--completion-promise "…"` (por ejemplo `COMPLETE`, `DONE`). Un grep en el `Stop hook` busca la cadena exacta. |
-| **Precondición de salida** | Hay que haber llamado a herramientas **Y** que Haiku diga `NO_FILE_CHANGES` | Basta con que coincida el texto del `<promise>`. El agent puede hacer trampa emitiendo la etiqueta antes de tiempo; la única defensa de ralph-loop es un prompt que le pide al agent que no mienta. |
+| **Disparador de salida** | Un subproceso de Claude Code de vida corta (`claude -p --model haiku`) es el **único** juez. Lee la entrada completa de cada invocación de herramienta y decide semánticamente si se modificó directamente algún archivo del proyecto. | El agent tiene que emitir una etiqueta XML `<promise>…</promise>` en su texto final. La frase dentro de las etiquetas es configurable vía `--completion-promise "…"` (por ejemplo `COMPLETE`, `DONE`). Un grep en el `Stop hook` busca la cadena exacta. |
+| **Precondición de salida** | Hay que haber llamado a herramientas **Y** que el subproceso clasificador diga `NO_FILE_CHANGES` | Basta con que coincida el texto del `<promise>`. El agent puede hacer trampa emitiendo la etiqueta antes de tiempo; la única defensa de ralph-loop es un prompt que le pide al agent que no mienta. |
 | **Visibilidad para el agent** | Completamente oculto (sin systemMessage, sin banner, diagnósticos solo por stderr) | Al agent se le informa del bucle y del protocolo del promise |
 | **Ámbito del estado** | Un archivo de estado por cada sesión de Claude Code — sin límite de watchdogs concurrentes en el mismo proyecto | Un solo archivo de estado por proyecto — solo UN ralph-loop puede correr por proyecto a la vez |
 | **Formato del archivo de estado** | JSON (parseado con `JSON.parse` nativo) | Markdown con frontmatter YAML (parseado con sed/awk/grep) |

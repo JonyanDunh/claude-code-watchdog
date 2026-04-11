@@ -1,6 +1,6 @@
 {
   "name": "watchdog",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Self-referential loop for Claude Code. Re-feeds the same prompt after every turn until files actually stop changing.",
   "author": {
     "name": "Jonyan Dunh",

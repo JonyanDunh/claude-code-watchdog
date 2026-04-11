@@ -60,7 +60,7 @@ O resto é tudo automático. O agente nunca fica sabendo que tem um loop rolando
 
 - **Zero trapaça do agente** — O agente nunca é avisado de que está num loop. Nada de `systemMessage`, nada de contador de iterações, nada de banner de inicialização. Ele não consegue dar um curto-circuito soltando um sinal de conclusão falso.
 - **Verificação obrigatória via ferramentas** — Um turno só com texto ("verifiquei, tá tudo certo") nunca encerra o loop. O agente **tem** que chamar uma ferramenta de verdade pra nem ser considerado apto a sair.
-- **Detecção de mudanças feita por LLM, consciente do projeto** — Uma chamada headless `claude -p --model haiku` é a **única** responsável por julgar "esse turno modificou algum arquivo do projeto?". Ela enxerga o input completo de cada invocação de ferramenta e decide semanticamente.
+- **Detecção de mudanças feita por LLM, consciente do projeto** — A cada disparo do hook, o Watchdog sobe um **subprocesso do Claude Code** curtinho (`claude -p --model haiku`) e faz uma única pergunta pra ele: "esse turno modificou algum arquivo do projeto?". O subprocesso enxerga o input completo de cada invocação de ferramenta e decide semanticamente. O Haiku é só o modelo — o importante é que é um **processo do Claude Code isolado e stateless**, não um cliente de API customizado, então sua autenticação `claude` existente é reaproveitada do jeito que tá.
 - **Isolamento por sessão** — O arquivo de estado é chaveado pelo ID do processo pai do Claude Code, descoberto caminhando pela ancestralidade do processo. 100 sessões simultâneas de watchdog no mesmo diretório do projeto nunca dão conflito.
 - **Escondido por design** — Toda a saída de diagnóstico vai pro stderr. O transcript JSONL nunca vaza metadados do loop pro contexto do agente.
 - **Apache 2.0** — Derivado de forma limpa do plugin `ralph-loop` da própria Anthropic, com a atribuição completa no [NOTICE](./NOTICE).
@@ -99,7 +99,7 @@ O loop encerra quando **as duas** condições abaixo são verdadeiras no último
 | Verificação | Requisito |
 | --- | --- |
 | **Pré-condição de uso de ferramenta** | O turno precisa ter invocado pelo menos uma ferramenta. Turnos só com texto nunca encerram o loop. |
-| **Veredicto do classificador Haiku** | Uma chamada headless `claude -p --model haiku` retorna `NO_FILE_CHANGES`. O classificador lê o input completo de cada invocação de ferramenta e decide semanticamente se o turno modificou diretamente algum arquivo do projeto. |
+| **Veredicto do subprocesso classificador** | Um subprocesso do Claude Code curtinho (`claude -p --model haiku`) retorna `NO_FILE_CHANGES`. O subprocesso lê o input completo de cada invocação de ferramenta e decide semanticamente se o turno modificou diretamente algum arquivo do projeto. |
 
 Se qualquer uma das duas falhar, o loop continua. Outras formas de sair:
 
@@ -265,7 +265,7 @@ Implement feature X using TDD:
 
 ### 4. Sempre defina `--max-iterations`
 
-O classificador Haiku não é infalível. Um agente travado que fica fazendo edições sem sentido, ou um que se perde e para de editar cedo demais, precisa cair num limite rígido. `--max-iterations 20` é um default razoável.
+O subprocesso classificador não é infalível. Um agente travado que fica fazendo edições sem sentido, ou um que se perde e para de editar cedo demais, precisa cair num limite rígido. `--max-iterations 20` é um default razoável.
 
 ---
 
@@ -289,15 +289,19 @@ O classificador Haiku não é infalível. Um agente travado que fica fazendo edi
 
 ## Requisitos
 
+O Watchdog precisa **tanto do `claude` quanto do `node` no seu `PATH`** — o `node` roda os scripts de hook e setup do plugin, e o `claude` é o que o watchdog sobe (`claude -p --model haiku`) pra julgar se cada turno modificou algum arquivo do projeto.
+
 | Requisito | Por quê |
 | --- | --- |
 | **`Claude Code` 2.1+** | Usa o sistema de Stop hook e o formato de plugin do marketplace |
 | **`node`** 18+ no `PATH` | Runtime dos hooks e scripts de setup do plugin |
-| **CLI `claude`** no `PATH` | Usada na chamada headless de classificação do Haiku. Precisa estar autenticada (OAuth ou `ANTHROPIC_API_KEY`) |
+| **CLI `claude`** no `PATH` | A cada disparo do hook, o Watchdog sobe um subprocesso `claude -p --model haiku` curtinho pra classificar o turno. Precisa estar autenticada (OAuth ou `ANTHROPIC_API_KEY`) — o subprocesso reaproveita as credenciais da sua sessão existente. |
 
 ### Instalar dependências
 
-Se você instalou o `Claude Code` via `npm install -g @anthropic-ai/claude-code`, já tem o `node` no `PATH` e não precisa instalar mais nada. Caso contrário:
+Se você instalou o `Claude Code` via `npm install -g @anthropic-ai/claude-code`, já ganha **os dois** — `claude` e `node` — no mesmo pacote: o install do npm coloca o `claude` no seu `PATH`, e o Node.js é o runtime do próprio npm, então ele já tá lá. Não precisa instalar mais nada.
+
+Se você instalou o `Claude Code` de outro jeito (binário standalone, Homebrew, instalador do Windows), o `claude` já tá no seu `PATH`, mas pode ser que precise instalar o Node.js 18+ separado:
 
 **macOS (Homebrew):**
 
@@ -376,7 +380,7 @@ claude-code-watchdog/
 │   ├── stdin.js             # leitor sync de stdin
 │   ├── state.js             # ciclo de vida atômico do arquivo de estado
 │   ├── transcript.js        # parser de JSONL + extração de ferramentas do turno atual
-│   ├── judge.js             # subprocess headless do Haiku + parser de veredicto
+│   ├── judge.js             # subprocesso classificador do Claude Code + parser de veredicto
 │   └── claude-pid.js        # caminhada pela ancestralidade do processo
 ├── test/                    # testes unitários + integração com node:test
 │   ├── fixtures/            # fixtures JSONL de transcript
@@ -404,8 +408,8 @@ O Watchdog mantém a mecânica principal — um Stop hook que reinjeta o prompt 
 
 | | Watchdog | ralph-loop |
 | --- | --- | --- |
-| **Gatilho de saída** | O classificador headless Haiku é o **único** juiz. Ele lê o input completo de cada invocação de ferramenta e decide semanticamente se algum arquivo do projeto foi modificado diretamente. | O agente tem que emitir uma tag XML `<promise>…</promise>` no texto final. A frase dentro das tags é configurável via `--completion-promise "…"` (por exemplo `COMPLETE`, `DONE`). Um grep no Stop hook casa a string exata. |
-| **Pré-condição de saída** | Ferramentas precisam ter sido chamadas **E** o Haiku precisa dizer `NO_FILE_CHANGES` | Só o match do texto `<promise>`. O agente pode trapacear emitindo a tag antes da hora; a única defesa do `ralph-loop` é um prompt pedindo que o agente não minta. |
+| **Gatilho de saída** | Um subprocesso do Claude Code curtinho (`claude -p --model haiku`) é o **único** juiz. Ele lê o input completo de cada invocação de ferramenta e decide semanticamente se algum arquivo do projeto foi modificado diretamente. | O agente tem que emitir uma tag XML `<promise>…</promise>` no texto final. A frase dentro das tags é configurável via `--completion-promise "…"` (por exemplo `COMPLETE`, `DONE`). Um grep no Stop hook casa a string exata. |
+| **Pré-condição de saída** | Ferramentas precisam ter sido chamadas **E** o subprocesso classificador precisa dizer `NO_FILE_CHANGES` | Só o match do texto `<promise>`. O agente pode trapacear emitindo a tag antes da hora; a única defesa do `ralph-loop` é um prompt pedindo que o agente não minta. |
 | **Visibilidade pro agente** | Totalmente escondido (sem systemMessage, sem banner, diagnósticos só no stderr) | O agente é informado sobre o loop e o protocolo de promise |
 | **Escopo do estado** | Um arquivo de estado por sessão do Claude Code — quantos watchdogs simultâneos quiser no mesmo projeto | Um único arquivo de estado por projeto — só UM ralph-loop roda por projeto de cada vez |
 | **Formato do arquivo de estado** | JSON (parseado com `JSON.parse` nativo) | Markdown com frontmatter YAML (parseado com sed/awk/grep) |
