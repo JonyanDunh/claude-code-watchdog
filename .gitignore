@@ -6,3 +6,4 @@
 # the plugin against a local marketplace. None of this should ever land
 # in the repo.
 .claude/
+/tmp/
