@@ -12,6 +12,9 @@
 // coreutils with a single cross-platform Node file. See NOTICE at the
 // repo root for the full change list.
 
+const fs = require('fs');
+const path = require('path');
+
 const { error, debug } = require('../lib/log');
 const { create } = require('../lib/state');
 const { findClaudePid } = require('../lib/claude-pid');
@@ -19,6 +22,7 @@ const { findClaudePid } = require('../lib/claude-pid');
 function parseArgs(argv) {
   const promptParts = [];
   let maxIterations = 0;
+  let promptFile = null;
   let help = false;
 
   for (let i = 0; i < argv.length; i++) {
@@ -39,10 +43,64 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (token === '--prompt-file') {
+      const next = argv[i + 1];
+      if (next === undefined) {
+        return { error: '--prompt-file requires a path argument' };
+      }
+      promptFile = next;
+      i += 1;
+      continue;
+    }
     promptParts.push(token);
   }
 
-  return { promptParts, maxIterations, help };
+  return { promptParts, maxIterations, promptFile, help };
+}
+
+// Read a prompt from a file, bypassing shell escaping entirely. Used when
+// the prompt contains characters that would break `$ARGUMENTS` substitution
+// inside the slash command's `!` block — newlines, quotes, backticks,
+// `$`, etc. Returns `{ prompt }` on success or `{ error }` on failure.
+//
+// Path handling is delegated to path.resolve(), which is platform-aware:
+//   - Absolute POSIX paths (/home/…) pass through unchanged on Linux/Mac.
+//   - Absolute Windows paths (C:\…, C:/…, \\server\share\…) pass through
+//     unchanged on Windows.
+//   - Relative paths are resolved against process.cwd() on every platform.
+// `~` is NOT expanded here — that's the shell's job, and bash/zsh already
+// expand it before the args reach this script. cmd.exe users should pass
+// absolute paths or use %USERPROFILE%.
+function readPromptFile(promptFile) {
+  const resolved = path.resolve(process.cwd(), promptFile);
+  let contents;
+  try {
+    contents = fs.readFileSync(resolved, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      return { error: `prompt file not found: ${resolved}` };
+    }
+    if (e.code === 'EISDIR') {
+      return { error: `--prompt-file expects a file, got a directory: ${resolved}` };
+    }
+    if (e.code === 'EACCES' || e.code === 'EPERM') {
+      return { error: `permission denied reading prompt file: ${resolved}` };
+    }
+    return { error: `failed to read prompt file ${resolved}: ${e.message}` };
+  }
+  // Strip UTF-8 BOM. Windows tools (Notepad, PowerShell's `Set-Content`
+  // without `-Encoding utf8NoBOM`) frequently add U+FEFF at the start of
+  // UTF-8 files. `.trim()` does not remove it (BOM is not whitespace), so
+  // without this line the first char of the prompt Claude sees would be
+  // an invisible zero-width marker.
+  if (contents.charCodeAt(0) === 0xfeff) {
+    contents = contents.slice(1);
+  }
+  const prompt = contents.trim();
+  if (!prompt) {
+    return { error: `prompt file is empty: ${resolved}` };
+  }
+  return { prompt };
 }
 
 function printHelp() {
@@ -58,6 +116,7 @@ function printHelp() {
     '',
     'Quick usage:',
     '    /watchdog:start "<your prompt>" [--max-iterations N]',
+    '    /watchdog:start --prompt-file <path> [--max-iterations N]',
     '    /watchdog:stop',
   ];
   for (const line of lines) process.stderr.write(`${line}\n`);
@@ -76,7 +135,27 @@ function main() {
     process.exit(0);
   }
 
-  const prompt = parsed.promptParts.join(' ').trim();
+  // --prompt-file and inline positional prompt are mutually exclusive.
+  // Supporting both would force us to invent a merge policy (prepend?
+  // append? error?) and every choice is surprising. Require exactly one.
+  if (parsed.promptFile && parsed.promptParts.length > 0) {
+    error('--prompt-file cannot be combined with a positional prompt');
+    process.stderr.write('   Pick one: either pass the prompt inline, or use --prompt-file <path>.\n');
+    process.exit(1);
+  }
+
+  let prompt;
+  if (parsed.promptFile) {
+    const result = readPromptFile(parsed.promptFile);
+    if (result.error) {
+      error(result.error);
+      process.exit(1);
+    }
+    prompt = result.prompt;
+  } else {
+    prompt = parsed.promptParts.join(' ').trim();
+  }
+
   if (!prompt) {
     error('No prompt provided');
     process.stderr.write('\n');
@@ -85,7 +164,7 @@ function main() {
     process.stderr.write('   Examples:\n');
     process.stderr.write('     /watchdog:start "Build a REST API for todos"\n');
     process.stderr.write('     /watchdog:start "Fix the auth bug" --max-iterations 20\n');
-    process.stderr.write('     /watchdog:start "Refactor the cache layer" --max-iterations 20\n');
+    process.stderr.write('     /watchdog:start --prompt-file ./tmp/my-prompt.txt --max-iterations 20\n');
     process.stderr.write('\n');
     process.stderr.write('   For the full reference: /watchdog:help\n');
     process.exit(1);
