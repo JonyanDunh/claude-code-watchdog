@@ -1,7 +1,7 @@
 {
   "name": "watchdog",
-  "version": "1.1.0",
-  "description": "Self-referential loop for Claude Code. Re-feeds the same prompt after every turn until files actually stop changing. Cross-platform Node.js implementation — no bash / jq dependencies, runs natively on Linux, macOS, and Windows.",
+  "version": "1.2.0",
+  "description": "Self-referential loop for Claude Code. Re-feeds the same prompt after every turn until files actually stop changing.",
   "author": {
     "name": "Jonyan Dunh",
     "email": "jonyandunh@outlook.com"
@@ -17,8 +17,6 @@
     "self-referential",
     "iteration",
     "convergence",
-    "ralph-loop",
-    "nodejs",
-    "cross-platform"
+    "ralph-loop"
   ]
 }

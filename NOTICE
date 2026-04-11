@@ -70,8 +70,23 @@ introduces the following substantive modifications:
     logic is extracted into reusable modules under lib/ (constants,
     state, transcript, judge, log, stdin), consumed by three thin
     entry points (setup-watchdog.js, stop-watchdog.js, stop-hook.js).
-    The port is covered by 53 tests using Node's built-in node:test
-    runner (no external test dependencies).
+    The port is covered by an automated test suite using Node's
+    built-in node:test runner (no external test dependencies).
+
+  - Replaced TERM_SESSION_ID with a process-ancestry walk to find the
+    parent Claude Code process ID (v1.2.0). Most terminal emulators
+    (Windows Terminal, macOS Terminal.app, GNOME Terminal, Alacritty,
+    tmux/screen, plain Linux ttys) do NOT export TERM_SESSION_ID —
+    only JetBrains IDE terminals, iTerm2, and WezTerm do — so the
+    v1.1.0 plugin was unusable for the majority of users. v1.2.0
+    walks the process tree upward from its own ppid until it finds a
+    process whose name is `claude`, and uses that PID as the
+    per-session state file key. This also eliminates the need for
+    the owner_session_id recursion guard: the headless Haiku
+    classifier subprocess naturally gets its own fresh Claude Code
+    process with a fresh PID, and its recursive Stop hook walks up
+    to find THAT PID (not the main session's), so state files are
+    naturally isolated without any explicit ownership bookkeeping.
 
 Files significantly modified from their ralph-loop originals include:
 
@@ -87,5 +102,6 @@ Files significantly modified from their ralph-loop originals include:
   - lib/judge.js              (new in Watchdog 1.1.0)
   - lib/log.js                (new in Watchdog 1.1.0)
   - lib/stdin.js              (new in Watchdog 1.1.0)
+  - lib/claude-pid.js         (new in Watchdog 1.2.0)
 
 See each file's header comment for a per-file attribution notice.

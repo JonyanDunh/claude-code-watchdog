@@ -14,6 +14,7 @@
 
 const { error } = require('../lib/log');
 const { create } = require('../lib/state');
+const { findClaudePid } = require('../lib/claude-pid');
 
 function parseArgs(argv) {
   const promptParts = [];
@@ -90,20 +91,25 @@ function main() {
     process.exit(1);
   }
 
-  const termSessionId = process.env.TERM_SESSION_ID;
-  if (!termSessionId) {
-    error('TERM_SESSION_ID is not set in the environment');
-    process.stderr.write('   Watchdog uses TERM_SESSION_ID to isolate per-session state files.\n');
-    process.stderr.write('   Your terminal emulator does not seem to export one.\n');
-    process.stderr.write('   Workarounds:\n');
-    process.stderr.write('     • Use a terminal that sets TERM_SESSION_ID (iTerm2, WezTerm, modern Linux terminals)\n');
-    process.stderr.write('     • Or: export TERM_SESSION_ID=$(node -e "console.log(require(\'crypto\').randomUUID())")\n');
+  // Key the state file by Claude Code's own PID, discovered by walking the
+  // process ancestry. Works on any terminal / any platform without needing
+  // the user to export TERM_SESSION_ID. See lib/claude-pid.js.
+  const claudePid = findClaudePid();
+  if (!claudePid) {
+    error('Could not find the Claude Code process in this script\'s ancestry');
+    process.stderr.write('   Watchdog uses the parent Claude Code process ID as its per-session key.\n');
+    process.stderr.write('   This is extremely unusual — Watchdog expects to run inside a Claude Code\n');
+    process.stderr.write('   slash command, which is always a descendant of a `claude` process.\n');
+    process.stderr.write('\n');
+    process.stderr.write('   If you are running this script manually for testing, set the\n');
+    process.stderr.write('   WATCHDOG_CLAUDE_PID env var to any positive integer to override the\n');
+    process.stderr.write('   ancestry walk.\n');
     process.exit(1);
   }
 
   create({
     cwd: process.cwd(),
-    termSessionId,
+    claudePid,
     prompt,
     maxIterations: parsed.maxIterations,
   });

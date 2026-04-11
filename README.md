@@ -4,7 +4,7 @@ English | [中文](./README.zh.md) | [한국어](./README.ko.md) | [日本語](.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1%2B-7C4DFF.svg)](https://docs.anthropic.com/claude-code)
-[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](./.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](./.claude-plugin/plugin.json)
 [![GitHub stars](https://img.shields.io/github/stars/JonyanDunh/claude-code-watchdog?style=flat&color=yellow)](https://github.com/JonyanDunh/claude-code-watchdog/stargazers)
 [![Inspired by ralph-loop](https://img.shields.io/badge/Inspired%20by-ralph--loop-orange.svg)](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/ralph-loop)
 
@@ -61,7 +61,7 @@ Everything else is automatic. The agent never knows a loop is running.
 - **Zero agent cheating** — The agent is never told it is inside a loop. No `systemMessage`, no iteration counter, no setup banner. It cannot short-circuit by emitting a fake completion signal.
 - **Forced tool verification** — A pure-text turn ("I've checked, all good") never ends the loop. The agent **must** actually invoke a tool before exit is even considered.
 - **LLM-judged, project-aware file-change detection** — A headless `claude -p --model haiku` call is the **sole** judge of "did this turn modify any project file". It sees every tool invocation's full input and decides semantically.
-- **Per-session isolation** — State file keyed by `TERM_SESSION_ID`, so running multiple watchdogs in different terminal tabs never collide.
+- **Per-session isolation** — State file is keyed by the parent Claude Code process ID, discovered by walking the process ancestry. 100 concurrent watchdogs in the same project directory never collide.
 - **Hidden by design** — All diagnostic output goes to stderr. The JSONL transcript never leaks loop metadata into the agent's context.
 - **Apache 2.0** — Cleanly derived from Anthropic's own `ralph-loop` plugin, with full attribution in [NOTICE](./NOTICE).
 
@@ -121,38 +121,35 @@ If either check fails, the loop continues. Additional exit paths:
 
 ## State File
 
-Per-session state lives at `.claude/watchdog.<TERM_SESSION_ID>.local.json`:
+Per-session state lives at `.claude/watchdog.claudepid.<PID>.local.json`, where `<PID>` is the parent Claude Code process ID discovered by walking the process ancestry. Example:
 
 ```json
 {
   "active": true,
   "iteration": 3,
   "max_iterations": 20,
-  "term_session_id": "c387e44a-afcd-4c0d-95da-5dc7cd2d8b22",
-  "started_at": "2026-04-10T12:00:00Z",
+  "claude_pid": 1119548,
+  "started_at": "2026-04-11T12:00:00Z",
   "prompt": "Fix the flaky auth tests..."
 }
 ```
 
-Each session has its own file, keyed by `TERM_SESSION_ID`. Running multiple watchdogs in different terminal tabs works without conflict.
+Every Claude Code session has a distinct PID, so **100 concurrent watchdogs in the same project directory never collide** — each gets its own state file, and `/watchdog:stop` in any one of them only cancels that specific session's loop.
 
 **Monitor active watchdogs:**
 
 ```bash
 # List all active per-session state files in this project
-ls .claude/watchdog.*.local.json
+ls .claude/watchdog.claudepid.*.local.json
 
-# Current iteration of a specific session
-jq .iteration .claude/watchdog.<SESSION_ID>.local.json
-
-# Full state
-jq . .claude/watchdog.<SESSION_ID>.local.json
+# Inspect one via jq or node
+node -e "console.log(JSON.parse(require('fs').readFileSync('.claude/watchdog.claudepid.<PID>.local.json','utf8')))"
 ```
 
 **Manually kill everything in this project:**
 
 ```bash
-rm -f .claude/watchdog.*.local.json
+rm -f .claude/watchdog.claudepid.*.local.json
 ```
 
 ---
@@ -292,14 +289,11 @@ The Haiku classifier is not infallible. A stuck agent that keeps making meaningl
 
 ## Requirements
 
-Watchdog 1.1.0 is a **Node.js rewrite**. No bash, no jq, no POSIX coreutils — just `node` and the `claude` CLI. Runs natively on Linux, macOS, and Windows.
-
 | Requirement | Why |
 | --- | --- |
 | **Claude Code 2.1+** | Uses the Stop hook system and marketplace plugin format |
-| **`node`** 18+ in `PATH` | All hook and setup logic is written in JavaScript. `node:test` (used by the test suite) requires Node 18+ |
+| **`node`** 18+ in `PATH` | Runtime for the plugin's hook and setup scripts |
 | **`claude` CLI** in `PATH` | Used for the headless Haiku classification call. Must be authenticated (OAuth or `ANTHROPIC_API_KEY`) |
-| **`TERM_SESSION_ID`** env var | Keys the per-session state file. Set by most terminal emulators (iTerm2, WezTerm, modern Linux terminals). Workaround if unset: `export TERM_SESSION_ID=$(node -e "console.log(require('crypto').randomUUID())")` before launching `claude`. |
 
 ### Install dependencies
 
@@ -347,16 +341,13 @@ scoop install nodejs-lts
 # or download the installer from https://nodejs.org
 ```
 
-No WSL2 or Git Bash required — Watchdog 1.1.0 runs directly on native Windows.
-
 ### Platform support
 
 | Platform | Status |
 | --- | --- |
 | Linux (Node 18 / 20 / 22) | ✅ Tested in CI |
 | macOS (Node 18 / 20 / 22) | ✅ Tested in CI |
-| Windows (Node 18 / 20 / 22) | ✅ Tested in CI (native PowerShell / cmd, no WSL2 needed) |
-| WSL2 on Windows | ✅ Works (it's Linux) |
+| Windows (Node 18 / 20 / 22) | ✅ Tested in CI |
 
 ---
 
@@ -382,18 +373,21 @@ claude-code-watchdog/
 ├── lib/                     # shared modules (reused by all entry points)
 │   ├── constants.js         # state path pattern, marker tokens, prompt templates
 │   ├── log.js               # stderr diagnostics
-│   ├── stdin.js             # cross-platform sync stdin reader
+│   ├── stdin.js             # sync stdin reader
 │   ├── state.js             # atomic state file lifecycle
 │   ├── transcript.js        # JSONL parser + current-turn tool extraction
-│   └── judge.js             # headless Haiku subprocess + verdict parser
+│   ├── judge.js             # headless Haiku subprocess + verdict parser
+│   └── claude-pid.js        # process ancestry walk
 ├── test/                    # node:test unit + integration tests
 │   ├── fixtures/            # transcript JSONL fixtures
 │   ├── transcript.test.js
 │   ├── state.test.js
 │   ├── judge.test.js
+│   ├── claude-pid.test.js
 │   ├── setup.test.js
 │   ├── stop-watchdog.test.js
-│   └── stop-hook.test.js
+│   ├── stop-hook.test.js
+│   └── stop-hook-haiku.test.js
 ├── .github/                 # CI workflow (node --test matrix, jsonlint, markdownlint) + issue/PR templates
 ├── .gitattributes           # forces LF line endings
 ├── LICENSE                  # Apache License 2.0
@@ -401,32 +395,6 @@ claude-code-watchdog/
 ├── README.md                # this file
 └── README.{zh,ja,ko,es,vi,pt}.md  # translations
 ```
-
-## Testing
-
-Watchdog 1.1.0 ships with 59 automated tests using Node's built-in `node:test` runner — no external dependencies. The suite includes a mock-Claude-CLI integration test that exercises the **real** `spawnSync('claude', ...)` subprocess path (with a cross-platform POSIX + Windows `.cmd` wrapper on `PATH`), so the headless Haiku classifier code is covered across all verdict branches on Linux, macOS, **and** Windows. Run them from the repo root.
-
-**Node 22+:**
-
-```bash
-node --test 'test/*.test.js'
-```
-
-**Node 18 / 20** (glob support was added in v21, so you must list files explicitly or let your shell expand the glob):
-
-```bash
-node --test test/*.test.js
-```
-
-Or target a single file:
-
-```bash
-node --test test/transcript.test.js
-```
-
-CI runs the full suite on `ubuntu-latest`, `macos-latest`, and `windows-latest` across Node 18 / 20 / 22 on every push and pull request.
-
----
 
 ## Inspired By
 
@@ -439,9 +407,9 @@ Watchdog keeps the core mechanic — a Stop hook that re-feeds the prompt — an
 | **Exit trigger** | Headless Haiku classifier is the **sole** judge. It reads every tool invocation's full input and decides semantically whether any project file was directly modified. | The agent must emit a `<promise>…</promise>` XML tag in its final text. The phrase inside the tags is configurable via `--completion-promise "…"` (e.g. `COMPLETE`, `DONE`). A Stop hook grep matches the exact string. |
 | **Exit precondition** | Tools must have been called **AND** Haiku says `NO_FILE_CHANGES` | Just the `<promise>` text match. The agent can cheat by emitting the tag prematurely; ralph-loop's only defense is a prompt that asks the agent not to lie. |
 | **Agent visibility** | Completely hidden (no systemMessage, no banner, stderr-only diagnostics) | Agent is told about the loop and the promise protocol |
-| **State scoping** | Per-session file keyed by `TERM_SESSION_ID` | Project-scoped single state file |
+| **State scoping** | One state file per Claude Code session — unlimited concurrent watchdogs in the same project | One state file per project — only ONE ralph-loop can run per project at a time |
 | **State file format** | JSON (parsed with native `JSON.parse`) | Markdown with YAML frontmatter (parsed with sed/awk/grep) |
-| **Runtime** | Node.js 18+ — cross-platform (Linux, macOS, native Windows) | Bash + jq + POSIX coreutils — Unix-only |
+| **Runtime** | Node.js 18+ | Bash + jq + POSIX coreutils |
 
 See [`NOTICE`](./NOTICE) for the full attribution and the complete list of modifications.
 

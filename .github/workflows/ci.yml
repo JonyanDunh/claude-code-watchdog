@@ -41,6 +41,7 @@ jobs:
             test/transcript.test.js \
             test/state.test.js \
             test/judge.test.js \
+            test/claude-pid.test.js \
             test/setup.test.js \
             test/stop-watchdog.test.js \
             test/stop-hook.test.js \

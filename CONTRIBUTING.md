@@ -81,7 +81,7 @@ Common types:
 
 ## Testing your change
 
-Watchdog ships with 59 automated tests using Node's built-in `node:test` runner — no external test dependencies. Run them from the repo root:
+Watchdog ships with 75 automated tests (73 active + 2 skipped-when-inside-Claude-Code) using Node's built-in `node:test` runner — no external test dependencies. Run them from the repo root:
 
 ```bash
 # Node 22+: glob pattern
@@ -100,12 +100,13 @@ node --test test/transcript.test.js
 The suite covers:
 
 - **`test/transcript.test.js`** — JSONL parser, real-vs-tool_result user turn detection, tool_use extraction
-- **`test/state.test.js`** — atomic state file writes, merge updates, validation, per-session path keying
+- **`test/state.test.js`** — atomic state file writes, merge updates, validation, per-session path keying, concurrent-session enumeration
 - **`test/judge.test.js`** — verdict parser (FILE_CHANGES substring trap, ambiguous, empty, multi-token)
-- **`test/setup.test.js`** — E2E subprocess tests for `scripts/setup-watchdog.js`
-- **`test/stop-watchdog.test.js`** — E2E subprocess tests for `scripts/stop-watchdog.js`
-- **`test/stop-hook.test.js`** — E2E subprocess tests for `hooks/stop-hook.js` covering the recursion guard, ownership claim, max iterations cap, missing transcript, and pure-text turn branches (Haiku subprocess not invoked)
-- **`test/stop-hook-haiku.test.js`** — E2E integration tests that exercise the **real** `spawnSync('claude', ...)` subprocess path by placing a cross-platform mock Claude CLI (POSIX shell script + Windows `.cmd` wrapper) on the hook's `PATH`. Tests all verdict branches: FILE_CHANGES / NO_FILE_CHANGES / ambiguous (both markers) / ambiguous (neither marker) / CLI failure
+- **`test/claude-pid.test.js`** — process ancestry walk (lib/claude-pid.js): isClaudeProcessName heuristic, WATCHDOG_CLAUDE_PID env override, readProcComm / readProcPpid
+- **`test/setup.test.js`** — E2E subprocess tests for `scripts/setup-watchdog.js` including concurrent-session independence
+- **`test/stop-watchdog.test.js`** — E2E subprocess tests for `scripts/stop-watchdog.js`, including the "only cancels THIS session, leaves concurrent sessions alone" assertion
+- **`test/stop-hook.test.js`** — E2E subprocess tests for `hooks/stop-hook.js` covering the natural recursion isolation (different claudePid = different state file), max iterations cap, missing transcript, pure-text turn, and 3-concurrent-sessions scenario (Haiku subprocess not invoked — see next file)
+- **`test/stop-hook-haiku.test.js`** — E2E integration tests that exercise the **real** `spawnSync('claude', ...)` subprocess path by placing a mock Claude CLI (POSIX shell script + Windows `.cmd` wrapper) on the hook's `PATH`. Tests all verdict branches: FILE_CHANGES / NO_FILE_CHANGES / ambiguous (both markers) / ambiguous (neither marker) / CLI failure
 
 In addition to the unit/integration suite, you should **also** manually verify your change in a live Claude Code session:
 

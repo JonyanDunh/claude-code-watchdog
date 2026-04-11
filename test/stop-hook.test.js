@@ -4,9 +4,15 @@
 // invocation by piping a realistic HOOK_INPUT JSON to stdin and asserting
 // on stdout/stderr/exit code + state file side effects.
 //
-// Haiku is stubbed out: we either make the CLI missing, or we force the
-// "tool uses empty" branch which skips Haiku entirely. Either way we don't
-// spawn a real classifier here.
+// The Haiku subprocess path is NOT exercised here — every test either
+// takes a branch that exits before calling Haiku, or uses an assistant
+// turn with zero tool_use entries so the hook skips Haiku by the
+// "no tool invocations" precondition. The real subprocess spawn path is
+// covered by stop-hook-haiku.test.js via a mock Claude CLI on PATH.
+//
+// Tests inject WATCHDOG_CLAUDE_PID to bypass the process ancestry walk
+// in the hook (which would otherwise return null outside a real Claude
+// Code session).
 
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
@@ -27,10 +33,10 @@ after(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function writeStateFile(cwd, termSessionId, state) {
+function writeStateFile(cwd, claudePid, state) {
   const dir = path.join(cwd, '.claude');
   fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `watchdog.${termSessionId}.local.json`);
+  const filePath = path.join(dir, `watchdog.claudepid.${claudePid}.local.json`);
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
   return filePath;
 }
@@ -51,9 +57,11 @@ function runHook(hookInput, env = {}) {
 }
 
 describe('stop-hook.js', () => {
-  test('no TERM_SESSION_ID => allow stop (exit 0, no stdout)', () => {
+  test('no discoverable Claude Code PID => allow stop (exit 0, no stdout)', () => {
+    // With no override AND no real Claude Code ancestry, findClaudePid()
+    // returns null and the hook exits silently. This is the safe default.
     const env = Object.assign({}, process.env);
-    delete env.TERM_SESSION_ID;
+    delete env.WATCHDOG_CLAUDE_PID;
     const result = spawnSync('node', [HOOK], {
       cwd: tmpDir,
       env,
@@ -64,154 +72,79 @@ describe('stop-hook.js', () => {
     assert.equal(result.stdout, '');
   });
 
-  test('no state file => allow stop', () => {
+  test('no state file for our claudePid => allow stop', () => {
     const result = runHook(
       { session_id: 's1', transcript_path: '/tmp/nope' },
-      { TERM_SESSION_ID: 'not-active' }
+      { WATCHDOG_CLAUDE_PID: '500001' }
     );
     assert.equal(result.status, 0);
     assert.equal(result.stdout, '');
   });
 
   test('corrupt state file => rm + allow stop', () => {
-    const sessionId = 'hook-corrupt';
-    const stateFile = writeStateFile(tmpDir, sessionId, { lol: 'nope' });
+    const pid = 500002;
+    const stateFile = writeStateFile(tmpDir, pid, { lol: 'nope' });
     const result = runHook(
       { session_id: 's', transcript_path: '/tmp/x' },
-      { TERM_SESSION_ID: sessionId }
+      { WATCHDOG_CLAUDE_PID: String(pid) }
     );
     assert.equal(result.status, 0);
     assert.equal(result.stdout, '');
     assert.equal(fs.existsSync(stateFile), false);
   });
 
-  test('recursive Haiku subprocess call => no-op (state preserved)', () => {
-    const sessionId = 'hook-recursion';
-    const stateFile = writeStateFile(tmpDir, sessionId, {
+  test('recursive Haiku subprocess (different claudePid) => no-op, state preserved', () => {
+    // The main session's state file lives under claudePid 500003. A recursive
+    // Haiku subprocess would have its own distinct PID, so its findClaudePid()
+    // returns something different (here we simulate by passing a different
+    // WATCHDOG_CLAUDE_PID to a second hook invocation).
+    const mainPid = 500003;
+    const stateFile = writeStateFile(tmpDir, mainPid, {
       active: true,
       iteration: 1,
       max_iterations: 10,
-      term_session_id: sessionId,
+      claude_pid: mainPid,
       started_at: '2026-04-11T00:00:00Z',
       prompt: 'do the refactor',
-      owner_session_id: 'OWNER-SESSION',
     });
 
-    // Different session_id simulates the recursive Haiku subprocess.
+    // Simulate recursive hook fire from the Haiku subprocess — different PID.
+    const haikuPid = 500004;
     const result = runHook(
-      { session_id: 'DIFFERENT-SESSION', transcript_path: '/tmp/none' },
-      { TERM_SESSION_ID: sessionId }
+      { session_id: 'HAIKU-SESSION', transcript_path: '/tmp/none' },
+      { WATCHDOG_CLAUDE_PID: String(haikuPid) }
     );
     assert.equal(result.status, 0);
     assert.equal(result.stdout, '');
-    // State file is preserved because we bailed early.
+
+    // Main session's state file is UNTOUCHED because the recursive hook
+    // looked up watchdog.claudepid.500004.local.json (which doesn't exist)
+    // and never touched watchdog.claudepid.500003.local.json.
     assert.equal(fs.existsSync(stateFile), true);
     const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
     assert.equal(state.iteration, 1);
-    assert.equal(state.owner_session_id, 'OWNER-SESSION');
+    assert.equal(state.claude_pid, mainPid);
     fs.unlinkSync(stateFile);
-  });
-
-  test('first fire claims ownership', () => {
-    const sessionId = 'hook-first-fire';
-    const transcript = writeTranscript(tmpDir, [
-      { type: 'user', message: { role: 'user', content: 'prompt' } },
-      {
-        type: 'assistant',
-        message: { role: 'assistant', content: [] }, // no tool uses => skip Haiku
-      },
-    ]);
-    const stateFile = writeStateFile(tmpDir, sessionId, {
-      active: true,
-      iteration: 1,
-      max_iterations: 10,
-      term_session_id: sessionId,
-      started_at: '2026-04-11T00:00:00Z',
-      prompt: 'do the refactor',
-    });
-
-    const result = runHook(
-      { session_id: 'CLAIMING-SESSION', transcript_path: transcript },
-      { TERM_SESSION_ID: sessionId }
-    );
-    // No tool uses => skip Haiku => fall through to block + re-feed
-    assert.equal(result.status, 0);
-    const decision = JSON.parse(result.stdout);
-    assert.equal(decision.decision, 'block');
-    assert.match(decision.reason, /do the refactor/);
-    assert.match(decision.reason, /verification/i);
-
-    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-    assert.equal(state.owner_session_id, 'CLAIMING-SESSION');
-    assert.equal(state.iteration, 2);
-
-    fs.unlinkSync(stateFile);
-    fs.unlinkSync(transcript);
-  });
-
-  test('max iterations reached => rm + allow stop', () => {
-    const sessionId = 'hook-max';
-    const stateFile = writeStateFile(tmpDir, sessionId, {
-      active: true,
-      iteration: 10,
-      max_iterations: 10,
-      term_session_id: sessionId,
-      started_at: '2026-04-11T00:00:00Z',
-      prompt: 'do the refactor',
-      owner_session_id: 'OWNER',
-    });
-
-    const result = runHook(
-      { session_id: 'OWNER', transcript_path: '/tmp/none' },
-      { TERM_SESSION_ID: sessionId }
-    );
-    assert.equal(result.status, 0);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, /Max iterations/);
-    assert.equal(fs.existsSync(stateFile), false);
-  });
-
-  test('missing transcript file => rm + allow stop', () => {
-    const sessionId = 'hook-missing-transcript';
-    const stateFile = writeStateFile(tmpDir, sessionId, {
-      active: true,
-      iteration: 1,
-      max_iterations: 10,
-      term_session_id: sessionId,
-      started_at: '2026-04-11T00:00:00Z',
-      prompt: 'do the refactor',
-      owner_session_id: 'OWNER',
-    });
-
-    const result = runHook(
-      { session_id: 'OWNER', transcript_path: '/tmp/this-does-not-exist.jsonl' },
-      { TERM_SESSION_ID: sessionId }
-    );
-    assert.equal(result.status, 0);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, /Transcript file not found/);
-    assert.equal(fs.existsSync(stateFile), false);
   });
 
   test('pure-text turn (no tool uses) => continues loop via block', () => {
-    const sessionId = 'hook-text-only';
+    const pid = 500005;
     const transcript = writeTranscript(tmpDir, [
       { type: 'user', message: { role: 'user', content: 'prompt' } },
       { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'all done' }] } },
     ]);
-    const stateFile = writeStateFile(tmpDir, sessionId, {
+    const stateFile = writeStateFile(tmpDir, pid, {
       active: true,
       iteration: 2,
       max_iterations: 10,
-      term_session_id: sessionId,
+      claude_pid: pid,
       started_at: '2026-04-11T00:00:00Z',
       prompt: 'do the refactor',
-      owner_session_id: 'OWNER',
     });
 
     const result = runHook(
-      { session_id: 'OWNER', transcript_path: transcript },
-      { TERM_SESSION_ID: sessionId }
+      { session_id: 's', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(pid) }
     );
     assert.equal(result.status, 0);
     const decision = JSON.parse(result.stdout);
@@ -223,6 +156,101 @@ describe('stop-hook.js', () => {
     assert.equal(state.iteration, 3);
 
     fs.unlinkSync(stateFile);
+    fs.unlinkSync(transcript);
+  });
+
+  test('max iterations reached => rm + allow stop', () => {
+    const pid = 500006;
+    const stateFile = writeStateFile(tmpDir, pid, {
+      active: true,
+      iteration: 10,
+      max_iterations: 10,
+      claude_pid: pid,
+      started_at: '2026-04-11T00:00:00Z',
+      prompt: 'do the refactor',
+    });
+
+    const result = runHook(
+      { session_id: 's', transcript_path: '/tmp/none' },
+      { WATCHDOG_CLAUDE_PID: String(pid) }
+    );
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Max iterations/);
+    assert.equal(fs.existsSync(stateFile), false);
+  });
+
+  test('missing transcript file => rm + allow stop', () => {
+    const pid = 500007;
+    const stateFile = writeStateFile(tmpDir, pid, {
+      active: true,
+      iteration: 1,
+      max_iterations: 10,
+      claude_pid: pid,
+      started_at: '2026-04-11T00:00:00Z',
+      prompt: 'do the refactor',
+    });
+
+    const result = runHook(
+      { session_id: 's', transcript_path: '/tmp/this-does-not-exist.jsonl' },
+      { WATCHDOG_CLAUDE_PID: String(pid) }
+    );
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Transcript file not found/);
+    assert.equal(fs.existsSync(stateFile), false);
+  });
+
+  test('concurrent sessions: 3 state files, each hook only touches its own', () => {
+    // Simulate three Claude Code sessions in the same project. Each has its
+    // own state file keyed by its own claudePid. When hook fires for session
+    // B, sessions A and C must remain untouched.
+    const pidA = 500101;
+    const pidB = 500102;
+    const pidC = 500103;
+
+    const transcript = writeTranscript(tmpDir, [
+      { type: 'user', message: { role: 'user', content: 'prompt' } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+    ]);
+
+    const fileA = writeStateFile(tmpDir, pidA, {
+      active: true, iteration: 1, max_iterations: 10, claude_pid: pidA,
+      started_at: '2026-04-11T00:00:00Z', prompt: 'session A prompt',
+    });
+    const fileB = writeStateFile(tmpDir, pidB, {
+      active: true, iteration: 1, max_iterations: 10, claude_pid: pidB,
+      started_at: '2026-04-11T00:00:00Z', prompt: 'session B prompt',
+    });
+    const fileC = writeStateFile(tmpDir, pidC, {
+      active: true, iteration: 1, max_iterations: 10, claude_pid: pidC,
+      started_at: '2026-04-11T00:00:00Z', prompt: 'session C prompt',
+    });
+
+    // Fire the hook as session B.
+    const result = runHook(
+      { session_id: 'B', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(pidB) }
+    );
+    assert.equal(result.status, 0);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, 'block');
+    // Only session B's prompt should be re-fed.
+    assert.match(decision.reason, /session B prompt/);
+
+    // Session A and C state files are UNTOUCHED (same iteration).
+    const stateA = JSON.parse(fs.readFileSync(fileA, 'utf8'));
+    const stateC = JSON.parse(fs.readFileSync(fileC, 'utf8'));
+    assert.equal(stateA.iteration, 1);
+    assert.equal(stateC.iteration, 1);
+
+    // Session B's iteration bumped to 2.
+    const stateB = JSON.parse(fs.readFileSync(fileB, 'utf8'));
+    assert.equal(stateB.iteration, 2);
+
+    fs.unlinkSync(fileA);
+    fs.unlinkSync(fileB);
+    fs.unlinkSync(fileC);
     fs.unlinkSync(transcript);
   });
 });
