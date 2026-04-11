@@ -1,7 +1,8 @@
 ---
 description: "Cancel active Watchdog"
+argument-hint: ""
 allowed-tools: ["Bash(node:*)"]
-hide-from-slash-command-tool: "true"
+disable-model-invocation: true
 ---
 
 ```!
