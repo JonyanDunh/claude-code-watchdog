@@ -117,6 +117,18 @@ Se qualquer uma das duas falhar, o loop continua. Outras formas de sair:
 | `/watchdog:stop` | Cancela o watchdog da sessão atual | `/watchdog:stop` |
 | `/watchdog:help` | Mostra a referência completa dentro do `Claude Code` | `/watchdog:help` |
 
+### Prompts longos a partir de um arquivo
+
+Se seu prompt contiver quebras de linha, aspas, crases, `$` ou outros caracteres que quebrariam o parser de argumentos do shell dentro do bloco `!` do slash command — por exemplo uma especificação de tarefa em Markdown com vários parágrafos — passe-o como um arquivo:
+
+```bash
+/watchdog:start --prompt-file ./tmp/my-task.md --max-iterations 20
+```
+
+O arquivo é lido diretamente pelo Node com `fs.readFileSync`, ignorando totalmente o escape do shell. Caminhos relativos são resolvidos a partir do diretório de trabalho atual da sessão do Claude Code. O BOM UTF-8 é removido automaticamente (arquivos do Bloco de Notas do Windows são seguros), o conteúdo CRLF é preservado byte a byte, e espaços em branco no início/fim são aparados. **Não pode ser combinado com um `<PROMPT>` inline** — escolha um ou outro.
+
+Funciona com caminhos POSIX em Linux/macOS/WSL (`/home/voce/…`, `./tmp/…`), caminhos absolutos do Windows (`C:\Users\voce\…`, `C:/Users/voce/…`) e caminhos UNC (`\\server\share\…`). O `~` é expandido pelo seu shell (bash/zsh), não pelo Watchdog — no `cmd.exe` use `%USERPROFILE%\…` ou um caminho absoluto. Caminhos com espaços precisam ser colocados entre aspas, como qualquer outro argumento de shell: `--prompt-file "./my prompts/task.md"`. Veja `/watchdog:help` para a referência completa de tratamento de caminhos.
+
 ---
 
 ## Arquivo de estado
@@ -414,6 +426,7 @@ O Watchdog mantém a mecânica principal — um Stop hook que reinjeta o prompt 
 | **Escopo do estado** | Um arquivo de estado por sessão do Claude Code — quantos watchdogs simultâneos quiser no mesmo projeto | Um único arquivo de estado por projeto — só UM ralph-loop roda por projeto de cada vez |
 | **Formato do arquivo de estado** | JSON (parseado com `JSON.parse` nativo) | Markdown com frontmatter YAML (parseado com sed/awk/grep) |
 | **Runtime** | Node.js 18+ | Bash + jq + POSIX coreutils |
+| **Entrada do prompt** | Inline via `$ARGUMENTS`, **ou** `--prompt-file <path>` — lê o arquivo diretamente com `fs.readFileSync` do Node, **ignorando totalmente o parser de argumentos do shell**. Seguro para Markdown de vários parágrafos contendo quebras de linha, aspas, crases, `$`, etc. O BOM UTF-8 é removido automaticamente; CRLF é preservado byte a byte. | Apenas inline via `$ARGUMENTS` no bloco `!` do shell do slash command. Qualquer `"`, `` ` ``, `$` ou quebra de linha sem escape no prompt quebra o parser do `bash` com `unexpected EOF`. Sem fallback para arquivo ou stdin — especificações de tarefa em Markdown com vários parágrafos precisam ser convertidas antes em uma string de uma única linha segura para o shell. |
 
 Veja o [`NOTICE`](./NOTICE) pra atribuição completa e a lista total de modificações.
 

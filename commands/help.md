@@ -38,11 +38,24 @@ Start a Watchdog in the current session.
 ```
 /watchdog:start "Refactor services/cache.ts to use the new API. Iterate until pnpm test:cache passes." --max-iterations 20
 /watchdog:start "Add tests for auth.ts until coverage hits 80%."
+/watchdog:start --prompt-file ./tmp/my-big-prompt.txt --max-iterations 20
 ```
 
 **Options:**
 
 - `--max-iterations <n>` — safety cap, loop exits after N iterations no matter what. Recommended: 20.
+- `--prompt-file <path>` — read the prompt from a file instead of passing it inline. Use this when your prompt contains newlines, quotes, backticks, `$`, or other characters that would break shell-argument parsing in the slash command's `!` block. Mutually exclusive with an inline positional prompt.
+
+  **Path handling:**
+
+  - **Linux / macOS / WSL:** POSIX absolute (`/home/you/prompts/task.txt`) or relative (`./tmp/task.txt`, `../notes.txt`) paths. Bare filenames resolve against the Claude Code session's current working directory.
+  - **Windows (native `cmd.exe` / PowerShell):** absolute (`C:\Users\you\prompts\task.txt` or `C:/Users/you/prompts/task.txt`), relative, and UNC (`\\server\share\task.txt`) paths all work through Node's `fs` APIs. Note: WSL files can be reached from native Windows via `\\wsl.localhost\<distro>\home\you\...` but this path is untested in CI — prefer running Claude Code *inside* WSL and using the POSIX path (`/home/you/...`).
+  - **Paths with spaces:** you must quote them yourself, just like any other shell argument: `--prompt-file "./my prompts/task.txt"`.
+  - **`~` is NOT expanded by Watchdog** — it relies on the shell. bash/zsh expand `~` to `$HOME` before Watchdog sees the arg, so `--prompt-file ~/task.txt` works there. `cmd.exe` does not expand `~`; Windows users should pass an absolute path or `%USERPROFILE%\task.txt`.
+  - **BOM is stripped automatically.** If you save your prompt with Windows Notepad or PowerShell's default `Set-Content`, the leading UTF-8 BOM is quietly removed so Claude doesn't see an invisible zero-width marker as the first character.
+  - **Line endings are preserved byte-for-byte.** CRLF files are not rewritten to LF — Claude handles both.
+  - **Encoding:** the file is read as UTF-8. Non-UTF-8 encodings (GBK, Shift-JIS, etc.) are not supported — convert to UTF-8 first.
+  - **Leading/trailing whitespace is trimmed;** interior whitespace and blank lines are preserved exactly.
 
 **Behavior:**
 

@@ -117,6 +117,18 @@ If either check fails, the loop continues. Additional exit paths:
 | `/watchdog:stop` | Cancel the watchdog in the current session | `/watchdog:stop` |
 | `/watchdog:help` | Print the full reference inside Claude Code | `/watchdog:help` |
 
+### Long prompts from a file
+
+If your prompt contains newlines, quotes, backticks, `$`, or other characters that would break shell-argument parsing inside the slash command's `!` block — for example a multi-paragraph Markdown task spec — pass it as a file instead:
+
+```bash
+/watchdog:start --prompt-file ./tmp/my-task.md --max-iterations 20
+```
+
+The file is read directly by Node (`fs.readFileSync`), bypassing shell escaping entirely. Relative paths resolve against the Claude Code session's current working directory. UTF-8 BOM is stripped automatically (so Windows Notepad files are safe), CRLF content is preserved byte-for-byte, and leading/trailing whitespace is trimmed. Mutually exclusive with an inline `<PROMPT>` — pick one or the other.
+
+Works with Linux/macOS/WSL POSIX paths (`/home/you/…`, `./tmp/…`), Windows absolute paths (`C:\Users\you\…`, `C:/Users/you/…`), and UNC paths (`\\server\share\…`). `~` is expanded by your shell (bash/zsh), not by Watchdog — on `cmd.exe` use `%USERPROFILE%\…` or an absolute path. Paths with spaces must be quoted as usual: `--prompt-file "./my prompts/task.md"`. See `/watchdog:help` for the full path-handling reference.
+
 ---
 
 ## State File
@@ -414,6 +426,7 @@ Watchdog keeps the core mechanic — a Stop hook that re-feeds the prompt — an
 | **State scoping** | One state file per Claude Code session — unlimited concurrent watchdogs in the same project | One state file per project — only ONE ralph-loop can run per project at a time |
 | **State file format** | JSON (parsed with native `JSON.parse`) | Markdown with YAML frontmatter (parsed with sed/awk/grep) |
 | **Runtime** | Node.js 18+ | Bash + jq + POSIX coreutils |
+| **Prompt input** | Inline via `$ARGUMENTS`, **or** `--prompt-file <path>` — reads the file directly with Node's `fs.readFileSync`, bypassing shell argument parsing entirely. Safe for multi-paragraph Markdown containing newlines, quotes, backticks, `$`, etc. UTF-8 BOM is stripped automatically; CRLF is preserved byte-for-byte. | Inline via `$ARGUMENTS` in the slash command's `!` shell block only. Any unescaped `"`, `` ` ``, `$`, or newline in the prompt breaks `bash` parsing with `unexpected EOF`. No file or stdin fallback — multi-paragraph Markdown task specs must be mangled into a single-line, shell-safe string first. |
 
 See [`NOTICE`](./NOTICE) for the full attribution and the complete list of modifications.
 
