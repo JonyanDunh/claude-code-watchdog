@@ -421,6 +421,208 @@ describe('stop-hook.js: Haiku subprocess integration (mock CLI)', () => {
     assert.equal(state.no_change_streak, 0);
   });
 
+  test('hot-reload + NO_FILE_CHANGES in the same iteration: streak resets first then increments to 1', () => {
+    // Exact ordering check: state has streak=2 (2 of 3 needed). The
+    // prompt file on disk has been edited to differ from the cached
+    // prompt. This iteration's events:
+    //
+    //   1. Hook reads state file, effectiveStreak = 2.
+    //   2. Hot-reload reads file -> content changed -> effectiveStreak
+    //      reset to 0, effectivePrompt = new content, promptChanged = true.
+    //   3. Haiku verdict = NO_FILE_CHANGES -> newStreak = 0 + 1 = 1.
+    //      That is < exit_confirmations (3), so the hook does NOT exit;
+    //      it persists no_change_streak = 1 and re-feeds the NEW prompt.
+    //
+    // The bug this guards against: if hot-reload's streak reset happened
+    // *after* the Haiku branch instead of before, this iteration would
+    // see streak=2 -> Haiku -> newStreak=3 -> exit, even though the task
+    // was just redefined and zero turns of the new task have been
+    // verified.
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const promptFile = path.join(cwd, 'live-prompt.md');
+    fs.writeFileSync(promptFile, 'BRAND NEW redefined task');
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 7,
+      exit_confirmations: 3,
+      no_change_streak: 2,
+      prompt: 'OLD task that almost converged',
+      prompt_file: promptFile,
+      watch_prompt_file: true,
+    });
+
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+    // Loop did NOT exit — block decision with the new prompt.
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, 'block');
+    assert.match(decision.reason, /BRAND NEW redefined task/);
+    assert.doesNotMatch(decision.reason, /OLD task that almost converged/);
+
+    // The convergence log says 1/3, NOT 3/3. This is the bug-guard
+    // assertion: if the streak hadn't been reset before Haiku, we would
+    // see 3/3 and an exit instead.
+    assert.match(result.stderr, /hot-reloading/);
+    assert.match(result.stderr, /resetting convergence streak/);
+    assert.match(result.stderr, /1\/3/);
+    assert.doesNotMatch(result.stderr, /3\/3/);
+    assert.doesNotMatch(result.stderr, /exiting loop/i);
+
+    // Persisted state: new prompt, streak = 1.
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.prompt, 'BRAND NEW redefined task');
+    assert.equal(state.no_change_streak, 1);
+    assert.equal(state.iteration, 8);
+  });
+
+  test('corrupted exit_confirmations field: string "3" defaults safely to 1 (no crash)', () => {
+    // Hand-edited state files might contain wrong types. The defensive
+    // default in stop-hook.js (`typeof state.exit_confirmations === 'number'
+    // && state.exit_confirmations >= 1 ? state.exit_confirmations : 1`)
+    // must catch every weird shape and fall back to 1 instead of throwing
+    // or producing garbage streak math.
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 1,
+      exit_confirmations: '3', // string, not number
+      no_change_streak: 0,
+    });
+
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    // Defaulted to 1 → first NO_FILE_CHANGES exits the loop.
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /no file modifications/i);
+    assert.equal(fs.existsSync(stateFile), false);
+  });
+
+  test('corrupted exit_confirmations field: 0 defaults safely to 1', () => {
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 1,
+      exit_confirmations: 0, // number but < 1
+      no_change_streak: 0,
+    });
+
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /no file modifications/i);
+    assert.equal(fs.existsSync(stateFile), false);
+  });
+
+  test('corrupted exit_confirmations field: negative number defaults safely to 1', () => {
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 1,
+      exit_confirmations: -5,
+      no_change_streak: 0,
+    });
+
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(fs.existsSync(stateFile), false);
+  });
+
+  test('corrupted exit_confirmations field: null defaults safely to 1', () => {
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 1,
+      exit_confirmations: null,
+      no_change_streak: 0,
+    });
+
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(fs.existsSync(stateFile), false);
+  });
+
+  test('exit_confirmations=3.5 (float, valid number >=1) is honored with integer streak math', () => {
+    // The CLI parser rejects non-integer --exit-confirmations, but a
+    // hand-edited state file could contain a float. The defensive check
+    // (`typeof === 'number' && >= 1`) accepts it. Streak arithmetic is
+    // integer (newStreak = effectiveStreak + 1) so the comparison
+    // `newStreak >= 3.5` first fires when newStreak == 4, not 3.
+    //
+    // This is documented quirky behavior, not a bug — but lock it in so
+    // a refactor doesn't accidentally start parsing 3.5 as 3 or crashing.
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 1,
+      exit_confirmations: 3.5,
+      no_change_streak: 0,
+    });
+
+    // Iteration 1: streak 0 -> 1, 1 < 3.5, continue.
+    let result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0);
+    assert.equal(JSON.parse(result.stdout).decision, 'block');
+    let state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.no_change_streak, 1);
+
+    // Iteration 2: 1 -> 2, continue.
+    result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.no_change_streak, 2);
+
+    // Iteration 3: 2 -> 3, 3 >= 3.5 is FALSE, continue.
+    result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(JSON.parse(result.stdout).decision, 'block');
+    state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.no_change_streak, 3);
+
+    // Iteration 4: 3 -> 4, 4 >= 3.5 is TRUE, EXIT.
+    result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /exiting loop/i);
+    assert.equal(fs.existsSync(stateFile), false);
+  });
+
   test('exit_confirmations=1 (default) still exits on first NO_FILE_CHANGES — regression check', () => {
     const { cwd, claudePid } = makeSession();
     const transcript = writeTranscriptWithToolUse(cwd);

@@ -509,6 +509,84 @@ describe('stop-hook.js', () => {
     fs.unlinkSync(promptFile);
   });
 
+  test('hot-reload + --no-classifier together: prompt updates, classifier still skipped', () => {
+    // Two orthogonal features composed in one iteration. The hot-reload
+    // path runs first (step 2 of the hook) and may update effectivePrompt
+    // and reset the streak. Then the no-classifier short-circuit (step 6)
+    // prevents askHaiku() from being called at all. Both must work
+    // together: the new prompt is re-fed AND no `claude` subprocess is
+    // ever spawned.
+    const pid = 500220;
+    const promptFile = path.join(tmpDir, `prompt-${pid}-combo.md`);
+    fs.writeFileSync(promptFile, 'NEW combined task');
+
+    const transcript = writeTranscript(tmpDir, [
+      { type: 'user', message: { role: 'user', content: 'prompt' } },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'tu_1', name: 'Write', input: { file_path: '/tmp/x', content: 'y' } },
+          ],
+        },
+      },
+    ]);
+    const stateFile = writeStateFile(tmpDir, pid, {
+      active: true,
+      iteration: 3,
+      max_iterations: 20,
+      claude_pid: pid,
+      started_at: '2026-04-11T00:00:00Z',
+      prompt: 'OLD combined task',
+      prompt_file: promptFile,
+      watch_prompt_file: true,
+      no_classifier: true,
+    });
+
+    // Strip claude from PATH so any spawn attempt would ENOENT — proves
+    // the no-classifier branch really did short-circuit before askHaiku().
+    const env = Object.assign({}, process.env, {
+      WATCHDOG_CLAUDE_PID: String(pid),
+      PATH: '/nonexistent/bin',
+      Path: '/nonexistent/bin',
+    });
+    const result = spawnSync(process.execPath, [HOOK], {
+      cwd: tmpDir,
+      env,
+      encoding: 'utf8',
+      input: JSON.stringify({ session_id: 's', transcript_path: transcript }),
+    });
+
+    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, 'block');
+    // Re-fed prompt is the NEW one from the file, not the OLD cached one.
+    assert.match(decision.reason, /NEW combined task/);
+    assert.doesNotMatch(decision.reason, /OLD combined task/);
+    // Both feature paths logged their info messages.
+    assert.match(result.stderr, /hot-reloading/);
+    assert.match(result.stderr, /no-classifier mode/);
+    // No Haiku attempt — if the hook had tried to spawn `claude`, the
+    // ENOENT would have surfaced as one of the askHaiku() failure
+    // messages. Assert their absence specifically (the no-classifier
+    // info log itself contains the word "classifier", so we can't just
+    // grep for that).
+    assert.doesNotMatch(result.stderr, /CLI not found/);
+    assert.doesNotMatch(result.stderr, /judgment call failed/);
+    assert.doesNotMatch(result.stderr, /ambiguous/i);
+    // And no success message either — the loop continues, doesn't exit.
+    assert.doesNotMatch(result.stderr, /no file modifications/i);
+
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.prompt, 'NEW combined task');
+    assert.equal(state.iteration, 4);
+    assert.equal(state.no_change_streak, 0);
+    fs.unlinkSync(stateFile);
+    fs.unlinkSync(transcript);
+    fs.unlinkSync(promptFile);
+  });
+
   test('hot-reload not enabled (watch_prompt_file=false) => file is NOT re-read', () => {
     const pid = 500208;
     const promptFile = path.join(tmpDir, `prompt-${pid}-noread.md`);
