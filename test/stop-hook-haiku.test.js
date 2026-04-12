@@ -297,4 +297,150 @@ describe('stop-hook.js: Haiku subprocess integration (mock CLI)', () => {
     const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
     assert.equal(state.iteration, 2);
   });
+
+  test('exit_confirmations=3: NO_FILE_CHANGES streak builds 1->2->3 then exits at 3', () => {
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    // Start the loop with exit_confirmations=3 and streak=0.
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 1,
+      exit_confirmations: 3,
+      no_change_streak: 0,
+    });
+
+    // Iteration 1 -> NO_FILE_CHANGES, streak goes 0 -> 1, loop continues.
+    let result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0, `iter1 stderr: ${result.stderr}`);
+    let decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, 'block');
+    assert.match(result.stderr, /1\/3/);
+    assert.match(result.stderr, /need 2 more/);
+    let state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.no_change_streak, 1);
+    assert.equal(state.iteration, 2);
+
+    // Iteration 2 -> NO_FILE_CHANGES, streak goes 1 -> 2, loop continues.
+    result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0, `iter2 stderr: ${result.stderr}`);
+    decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, 'block');
+    assert.match(result.stderr, /2\/3/);
+    assert.match(result.stderr, /need 1 more/);
+    state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.no_change_streak, 2);
+    assert.equal(state.iteration, 3);
+
+    // Iteration 3 -> NO_FILE_CHANGES, streak hits 3 == exit_confirmations, EXIT.
+    result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0, `iter3 stderr: ${result.stderr}`);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /3\/3/);
+    assert.match(result.stderr, /exiting loop/i);
+    assert.equal(fs.existsSync(stateFile), false);
+  });
+
+  test('exit_confirmations=3: FILE_CHANGES mid-streak resets back to 0', () => {
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 1,
+      exit_confirmations: 3,
+      no_change_streak: 2, // already had two NO_FILE_CHANGES in a row
+    });
+
+    // FILE_CHANGES verdict -> streak reset to 0, loop continues.
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, 'block');
+
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.no_change_streak, 0);
+    assert.equal(state.iteration, 2);
+  });
+
+  test('exit_confirmations=3: AMBIGUOUS verdict mid-streak resets back to 0', () => {
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 5,
+      exit_confirmations: 3,
+      no_change_streak: 2,
+    });
+
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'AMBIGUOUS_NEITHER' }
+    );
+    assert.equal(result.status, 0);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, 'block');
+    assert.match(result.stderr, /ambiguous/i);
+
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.no_change_streak, 0);
+  });
+
+  test('exit_confirmations=3: CLI_FAILED mid-streak resets back to 0', () => {
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 5,
+      exit_confirmations: 3,
+      no_change_streak: 2,
+    });
+
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'FAIL' }
+    );
+    assert.equal(result.status, 0);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.decision, 'block');
+    assert.match(result.stderr, /judgment call failed/i);
+
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.equal(state.no_change_streak, 0);
+  });
+
+  test('exit_confirmations=1 (default) still exits on first NO_FILE_CHANGES — regression check', () => {
+    const { cwd, claudePid } = makeSession();
+    const transcript = writeTranscriptWithToolUse(cwd);
+    const stateFile = writeStateFile(cwd, claudePid, {
+      iteration: 1,
+      // No exit_confirmations field at all (simulates v1.2.4 state file
+      // upgraded to v1.3.0 hook). Hook should treat as 1.
+      no_change_streak: 0,
+    });
+
+    const result = runHook(
+      cwd,
+      { session_id: 'OWNER', transcript_path: transcript },
+      { WATCHDOG_CLAUDE_PID: String(claudePid), WATCHDOG_FAKE_HAIKU_VERDICT: 'NO_FILE_CHANGES' }
+    );
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /no file modifications/i);
+    // The legacy single-confirm exit message has no x/y fraction.
+    assert.doesNotMatch(result.stderr, /1\/1/);
+    assert.equal(fs.existsSync(stateFile), false);
+  });
 });

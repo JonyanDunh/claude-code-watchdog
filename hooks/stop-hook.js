@@ -40,6 +40,7 @@ const { currentTurnToolUses } = require('../lib/transcript');
 const { askHaiku, VERDICT } = require('../lib/judge');
 const { VERIFICATION_REMINDER } = require('../lib/constants');
 const { findClaudePid } = require('../lib/claude-pid');
+const { readPromptFile } = require('../lib/prompt-file');
 
 // Allow the stop and exit 0. Never print anything to stdout here — Claude
 // Code interprets any stdout from a Stop hook as the JSON decision.
@@ -90,11 +91,55 @@ function main() {
     remove(stateFile);
     allowStop();
   }
+  // v1.3.0 fields are read with defaults, so v1.2.4 state files load
+  // unchanged. exitConfirmations defaults to 1 (legacy single-confirm
+  // exit), no_change_streak defaults to 0, no_classifier and watch flags
+  // default to false.
+  const exitConfirmations =
+    typeof state.exit_confirmations === 'number' && state.exit_confirmations >= 1
+      ? state.exit_confirmations
+      : 1;
+  const noClassifier = state.no_classifier === true;
+  const watchPromptFile = state.watch_prompt_file === true && typeof state.prompt_file === 'string';
+  // Mutable per-iteration values. Persisted at the end via a single
+  // update() call alongside the iteration bump.
+  let effectivePrompt = state.prompt;
+  let effectiveStreak = typeof state.no_change_streak === 'number' ? state.no_change_streak : 0;
+  let promptChanged = false;
+
   debug(
-    `stop-hook.js: state loaded — iteration=${state.iteration}, max=${state.max_iterations}, prompt_head='${(state.prompt || '').slice(0, 60)}'`
+    `stop-hook.js: state loaded — iteration=${state.iteration}, max=${state.max_iterations}, exit_confirmations=${exitConfirmations}, no_change_streak=${effectiveStreak}, no_classifier=${noClassifier}, watch_prompt_file=${watchPromptFile}, prompt_file=${state.prompt_file || 'none'}, prompt_head='${(state.prompt || '').slice(0, 60)}'`
   );
 
-  // 2. Read hook input (JSON piped in on stdin by Claude Code).
+  // 2. Hot-reload prompt from disk if --watch-prompt-file is enabled.
+  //    Failures (file vanished, permission denied, empty file) are silent
+  //    — the cached prompt in state.prompt is preserved and the loop
+  //    continues. The whole point of the hot-reload feature is that it
+  //    must NEVER crash the loop on a missing file: the user might have
+  //    moved/renamed/edited the file mid-iteration, and we want them to
+  //    be able to fix it on the next iteration without restarting the
+  //    whole watchdog. The agent must never see this happening.
+  if (watchPromptFile) {
+    const reloaded = readPromptFile(state.prompt_file);
+    if (reloaded.error) {
+      debug(`stop-hook.js: hot-reload skipped (${reloaded.error}) — keeping cached prompt`);
+    } else if (reloaded.prompt !== state.prompt) {
+      debug(
+        `stop-hook.js: hot-reload detected prompt change (old_head='${(state.prompt || '').slice(0, 40)}', new_head='${reloaded.prompt.slice(0, 40)}') — resetting streak`
+      );
+      info('prompt file changed on disk, hot-reloading and resetting convergence streak');
+      effectivePrompt = reloaded.prompt;
+      promptChanged = true;
+      // A prompt change implies the user redefined the task. Any earlier
+      // NO_FILE_CHANGES verdicts were judging convergence against the OLD
+      // task and are no longer relevant — start counting from zero again.
+      effectiveStreak = 0;
+    } else {
+      debug('stop-hook.js: hot-reload re-read file, content unchanged');
+    }
+  }
+
+  // 3. Read hook input (JSON piped in on stdin by Claude Code).
   let hookInput;
   try {
     hookInput = JSON.parse(readStdinSync());
@@ -104,14 +149,15 @@ function main() {
     allowStop();
   }
 
-  // 3. Max iterations hard stop.
+  // 4. Max iterations hard stop. This check fires regardless of
+  //    --no-classifier — it is the only escape hatch in that mode.
   if (state.max_iterations > 0 && state.iteration >= state.max_iterations) {
     stop(`Max iterations (${state.max_iterations}) reached.`);
     remove(stateFile);
     allowStop();
   }
 
-  // 4. Transcript must exist for us to inspect tool invocations.
+  // 5. Transcript must exist for us to inspect tool invocations.
   const transcriptPath = hookInput.transcript_path;
   if (!transcriptPath || typeof transcriptPath !== 'string') {
     warn('Hook input missing transcript_path');
@@ -139,54 +185,94 @@ function main() {
     allowStop();
   }
 
-  // 5. Exit precondition: the agent must have invoked at least one tool.
-  //    A pure-text turn never exits the loop — this prevents the agent from
-  //    falsely claiming completion from memory without doing real work.
-  if (toolUses.length === 0) {
+  // 6. --no-classifier short-circuit. Skip Haiku entirely; the loop only
+  //    exits via --max-iterations or /watchdog:stop. The streak counter is
+  //    irrelevant here (the CLI parser refuses --exit-confirmations when
+  //    --no-classifier is set), but defensively reset to 0 so a state file
+  //    edited by hand doesn't carry stale streak data forward.
+  if (noClassifier) {
+    info('no-classifier mode, skipping Haiku judgment and continuing loop');
+    effectiveStreak = 0;
+  } else if (toolUses.length === 0) {
+    // 7. Pure-text turn precondition. The agent must invoke at least one
+    //    tool before convergence can even be considered. Pure-text turns
+    //    do not increment the streak — they reset it. This is the
+    //    strict-A semantics: only an unambiguous, tool-backed
+    //    NO_FILE_CHANGES verdict counts toward exit_confirmations.
     info('no tool invocations this turn, continuing loop to force real verification');
-    // Fall through to re-feed — skip the Haiku call entirely.
+    effectiveStreak = 0;
   } else {
     const judgement = askHaiku(toolUses);
     switch (judgement.verdict) {
       case VERDICT.NO_FILE_CHANGES: {
-        success('Haiku judged no file modifications - exiting loop.');
-        remove(stateFile);
-        allowStop();
-        break; // unreachable after process.exit
+        const newStreak = effectiveStreak + 1;
+        if (newStreak >= exitConfirmations) {
+          if (exitConfirmations === 1) {
+            success('Haiku judged no file modifications - exiting loop.');
+          } else {
+            success(
+              `Haiku judged no file modifications (${newStreak}/${exitConfirmations}) - exiting loop.`
+            );
+          }
+          remove(stateFile);
+          allowStop();
+          break; // unreachable after process.exit
+        }
+        info(
+          `Haiku judged no file modifications (${newStreak}/${exitConfirmations}) - need ${exitConfirmations - newStreak} more, continuing loop`
+        );
+        effectiveStreak = newStreak;
+        break;
       }
       case VERDICT.FILE_CHANGES: {
-        // Clean verdict — fall through to re-feed.
+        // Clean verdict — files were modified. Reset the streak so the
+        // next NO_FILE_CHANGES has to start counting from 1 again.
+        effectiveStreak = 0;
         break;
       }
       case VERDICT.AMBIGUOUS: {
         const snippet = (judgement.raw || '').slice(0, 200);
         warn(`Haiku returned ambiguous answer ('${snippet}'), continuing loop as safety`);
+        effectiveStreak = 0;
         break;
       }
       case VERDICT.CLI_MISSING: {
         warn("'claude' CLI not found in PATH, continuing loop as safety");
+        effectiveStreak = 0;
         break;
       }
       case VERDICT.CLI_FAILED: {
         warn(`Haiku judgment call failed (exit ${judgement.exitCode}), continuing loop as safety`);
+        effectiveStreak = 0;
         break;
       }
       default: {
         warn(`Unexpected verdict type (${judgement.verdict}), continuing loop as safety`);
+        effectiveStreak = 0;
       }
     }
   }
 
-  // 6. Bump iteration and re-feed the original prompt as the next user turn.
-  const next = update(stateFile, { iteration: state.iteration + 1 });
+  // 8. Bump iteration and persist any state mutations from this turn
+  //    (streak counter and, if hot-reload changed it, the new prompt) in
+  //    a single atomic write. Re-feed the effective (possibly hot-
+  //    reloaded) prompt as the next user turn.
+  const patch = {
+    iteration: state.iteration + 1,
+    no_change_streak: effectiveStreak,
+  };
+  if (promptChanged) {
+    patch.prompt = effectivePrompt;
+  }
+  const next = update(stateFile, patch);
   if (!next) {
     warn('Lost race updating state file iteration — exiting');
     remove(stateFile);
     allowStop();
   }
 
-  debug(`stop-hook.js: total hook latency ${Date.now() - t0}ms, decision=block (continue loop)`);
-  blockAndRefeed(state.prompt);
+  debug(`stop-hook.js: total hook latency ${Date.now() - t0}ms, decision=block (continue loop), no_change_streak=${effectiveStreak}, prompt_changed=${promptChanged}`);
+  blockAndRefeed(effectivePrompt);
 }
 
 main();
