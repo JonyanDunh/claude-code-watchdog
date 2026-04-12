@@ -128,8 +128,7 @@ function printHelp() {
     '    /watchdog:stop',
     '',
     '  --max-iterations is optional. Omit it for an unlimited loop',
-    '  (only convergence or /watchdog:stop will exit). You do NOT',
-    '  need to pass --max-iterations 0 anymore.',
+    '  (only convergence or /watchdog:stop will exit).',
   ];
   for (const line of lines) process.stderr.write(`${line}\n`);
 }

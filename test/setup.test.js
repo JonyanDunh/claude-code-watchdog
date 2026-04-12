@@ -509,16 +509,19 @@ test('setup --no-classifier + --exit-confirmations => exit 1 (mutually exclusive
   assert.match(result.stderr, /--no-classifier cannot be combined with --exit-confirmations/);
 });
 
-test('setup --no-classifier + --max-iterations 0 is allowed (infinite loop, manual stop only)', () => {
+test('setup --no-classifier with no max cap is allowed (infinite loop, manual stop only)', () => {
+  // The recommended way to express "unlimited" is to omit the cap flag
+  // entirely. The state file's max_iterations field defaults to 0, and
+  // the stop hook treats 0 as "no cap" (the > 0 guard fails).
   const pid = 200024;
   const result = runSetup(
-    ['build', '--no-classifier', '--max-iterations', '0'],
+    ['build', '--no-classifier'],
     { WATCHDOG_CLAUDE_PID: String(pid) }
   );
   assert.equal(result.status, 0);
   const state = JSON.parse(fs.readFileSync(stateFileFor(pid), 'utf8'));
   assert.equal(state.no_classifier, true);
-  assert.equal(state.max_iterations, 0);
+  assert.equal(state.max_iterations, 0); // default — no cap
   fs.unlinkSync(stateFileFor(pid));
 });
 

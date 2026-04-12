@@ -163,7 +163,7 @@ For ralph-loop-style runs where you don't want any LLM judging convergence — y
 /watchdog:start "Keep iterating until I /watchdog:stop." --no-classifier
 ```
 
-The Stop hook skips the Haiku call entirely. The only ways to exit become `--max-iterations` and `/watchdog:stop`. **`--max-iterations` is optional** — if you omit it (as in the example above), the loop is truly unbounded and only stops when you say so. You no longer need to pass `--max-iterations 0` to mean "unlimited"; just leave the flag off entirely. (The `0` form is still accepted for backward compatibility.)
+The Stop hook skips the Haiku call entirely. The only ways to exit become `--max-iterations` and `/watchdog:stop`. **`--max-iterations` is optional** — if you omit it (as in the example above), the loop is truly unbounded and only stops when you say so.
 
 The `claude` CLI is not even required in this mode (the Haiku subprocess is never spawned). Compatible with `--prompt-file` and `--watch-prompt-file`. Mutually exclusive with `--exit-confirmations` — the streak counter is meaningless when there is no classifier returning verdicts.
 
@@ -317,7 +317,7 @@ Implement feature X using TDD:
 
 The classifier subprocess is not infallible. A stuck agent that keeps making meaningless edits, or one that gets confused and stops editing prematurely, should fall through to a hard stop. `--max-iterations 20` is a reasonable default for most work.
 
-**The flag is optional, though.** If you genuinely want an unlimited loop (e.g., a long-running maintenance loop you intend to stop manually with `/watchdog:stop`, or a `--no-classifier` run where convergence is judged by you, not Haiku), **just omit the flag entirely**. You do **not** need to pass `--max-iterations 0` — that form is still accepted for backward compatibility, but the natural way to express "unlimited" is now to leave the flag off.
+**The flag is optional, though.** If you genuinely want an unlimited loop (e.g., a long-running maintenance loop you intend to stop manually with `/watchdog:stop`, or a `--no-classifier` run where convergence is judged by you, not Haiku), **just omit the flag entirely**.
 
 ---
 
