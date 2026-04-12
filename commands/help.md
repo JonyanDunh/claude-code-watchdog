@@ -46,7 +46,7 @@ Start a Watchdog in the current session.
 
 **Options:**
 
-- `--max-iterations <n>` — **optional safety cap**. If passed, the loop exits after N iterations no matter what. **If you don't pass it, the loop is unlimited** — it will only exit via convergence (Haiku verdict + `--exit-confirmations`) or `/watchdog:stop` (or, under `--no-classifier`, only via `/watchdog:stop`). Recommended for most tasks: `--max-iterations 20`. You no longer need to pass `--max-iterations 0` to mean "unlimited" — just omit the flag entirely (the `0` form is still accepted for backward compatibility).
+- `--max-iterations <n>` — **optional safety cap**. If passed, the loop exits after N iterations no matter what. **If you don't pass it, the loop is unlimited** — it will only exit via convergence (Haiku verdict + `--exit-confirmations`) or `/watchdog:stop` (or, under `--no-classifier`, only via `/watchdog:stop`). Recommended for most tasks: `--max-iterations 20`. To express "unlimited", just leave the flag off entirely.
 - `--exit-confirmations <n>` — require **N consecutive** `NO_FILE_CHANGES` verdicts from the Haiku classifier before allowing the loop to exit. Default `1` (exit on the first clean verdict, identical to pre-1.3.0 behavior). Use a higher value when you want belt-and-suspenders confirmation that the work is really done — for example `--exit-confirmations 3` means the agent must finish three turns in a row without modifying any project file.
 
   **Strict reset semantics:** the streak counter is reset to `0` whenever the Haiku classifier returns anything other than a clean `NO_FILE_CHANGES` verdict — that includes `FILE_CHANGES`, `AMBIGUOUS`, `CLI_MISSING`, `CLI_FAILED`, or a pure-text turn (no tool invocations). Convergence has to be **unbroken** to count.
@@ -111,7 +111,7 @@ The state file is keyed by the **parent Claude Code process ID**, which Watchdog
 - **Clear completion criteria** — "no more edits needed" must be a verifiable answer, not subjective. Tie it to passing tests, a clean typecheck, zero lint errors, etc.
 - **Incremental verifiable goals** — if there's no verifiable end state, the loop will just spin.
 - **Self-correcting structure** — tell Claude how to notice failure and adapt.
-- **Set `--max-iterations` for most tasks** — even if the Haiku classifier is reliable, a stuck agent should fall through to a hard stop. `--max-iterations 20` is a reasonable default. **Omit the flag entirely** if you genuinely want unlimited iterations (e.g., a long-running maintenance loop you intend to stop manually with `/watchdog:stop`); you do **not** need to pass `--max-iterations 0`.
+- **Set `--max-iterations` for most tasks** — even if the Haiku classifier is reliable, a stuck agent should fall through to a hard stop. `--max-iterations 20` is a reasonable default. **Omit the flag entirely** if you genuinely want unlimited iterations (e.g., a long-running maintenance loop you intend to stop manually with `/watchdog:stop`).
 
 ## Learn more
 

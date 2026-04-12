@@ -163,7 +163,7 @@ Para execuções estilo ralph-loop onde você não quer nenhum LLM julgando conv
 /watchdog:start "Continue iterando até eu /watchdog:stop." --no-classifier
 ```
 
-O Stop hook pula a chamada ao Haiku completamente. As únicas formas de sair se tornam `--max-iterations` e `/watchdog:stop`. **`--max-iterations` é opcional** — se você omiti-lo (como no exemplo acima), o loop é verdadeiramente ilimitado e só para quando você manda. **Você não precisa mais passar `--max-iterations 0`** para significar "ilimitado"; basta deixar a flag de fora por completo. (A forma com `0` continua sendo aceita por compatibilidade.)
+O Stop hook pula a chamada ao Haiku completamente. As únicas formas de sair se tornam `--max-iterations` e `/watchdog:stop`. **`--max-iterations` é opcional** — se você omiti-lo (como no exemplo acima), o loop é verdadeiramente ilimitado e só para quando você manda.
 
 O CLI `claude` nem mesmo é necessário neste modo (o subprocesso Haiku nunca é spawned). Compatível com `--prompt-file` e `--watch-prompt-file`. **Mutuamente exclusivo com `--exit-confirmations`** — o contador de streak é sem sentido quando não há classificador retornando vereditos.
 
@@ -317,7 +317,7 @@ Implement feature X using TDD:
 
 O subprocesso classificador não é infalível. Um agente travado que fica fazendo edições sem sentido, ou um que se perde e para de editar cedo demais, precisa cair num limite rígido. `--max-iterations 20` é um default razoável para a maior parte do trabalho.
 
-**Mas a flag é opcional**. Se você genuinamente quer um loop ilimitado (por exemplo, um loop de manutenção de longa duração que você pretende parar manualmente com `/watchdog:stop`, ou uma execução `--no-classifier` onde a convergência é julgada por você, não pelo Haiku), **simplesmente omita a flag por completo**. Você **não** precisa passar `--max-iterations 0` — essa forma continua sendo aceita por compatibilidade, mas a maneira natural de expressar "ilimitado" agora é deixar a flag de fora.
+**Mas a flag é opcional**. Se você genuinamente quer um loop ilimitado (por exemplo, um loop de manutenção de longa duração que você pretende parar manualmente com `/watchdog:stop`, ou uma execução `--no-classifier` onde a convergência é julgada por você, não pelo Haiku), **simplesmente omita a flag por completo**.
 
 ---
 
