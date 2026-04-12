@@ -124,8 +124,12 @@ function printHelp() {
     '    /watchdog:start "<your prompt>" [--max-iterations N]',
     '    /watchdog:start --prompt-file <path> [--watch-prompt-file] [--max-iterations N]',
     '    /watchdog:start "..." --exit-confirmations 3 --max-iterations 20',
-    '    /watchdog:start "..." --no-classifier --max-iterations 20',
+    '    /watchdog:start "..." --no-classifier            # no --max-iterations = unlimited',
     '    /watchdog:stop',
+    '',
+    '  --max-iterations is optional. Omit it for an unlimited loop',
+    '  (only convergence or /watchdog:stop will exit). You do NOT',
+    '  need to pass --max-iterations 0 anymore.',
   ];
   for (const line of lines) process.stderr.write(`${line}\n`);
 }

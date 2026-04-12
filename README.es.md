@@ -160,10 +160,10 @@ Requiere `--prompt-file`. Pasar `--watch-prompt-file` solo es un error.
 Para ejecuciones estilo ralph-loop donde no quieres ningún LLM juzgando la convergencia — pararás el bucle manualmente o vía `--max-iterations`:
 
 ```bash
-/watchdog:start "Sigue iterando hasta que yo /watchdog:stop." --no-classifier --max-iterations 0
+/watchdog:start "Sigue iterando hasta que yo /watchdog:stop." --no-classifier
 ```
 
-El Stop hook salta la llamada a Haiku por completo. Las únicas formas de salir se vuelven `--max-iterations` y `/watchdog:stop`. Con `--max-iterations 0` obtienes un bucle ilimitado que solo para cuando tú lo dices.
+El Stop hook salta la llamada a Haiku por completo. Las únicas formas de salir se vuelven `--max-iterations` y `/watchdog:stop`. **`--max-iterations` es opcional** — si lo omites (como en el ejemplo de arriba), el bucle es verdaderamente ilimitado y solo para cuando tú lo dices. **Ya no necesitas pasar `--max-iterations 0`** para significar "ilimitado"; simplemente deja la flag fuera por completo. (La forma con `0` sigue siendo aceptada por compatibilidad.)
 
 El CLI `claude` ni siquiera es necesario en este modo (el subproceso de Haiku nunca se lanza). Compatible con `--prompt-file` y `--watch-prompt-file`. Mutuamente excluyente con `--exit-confirmations` — el contador del streak no tiene sentido cuando no hay un clasificador devolviendo veredictos.
 
@@ -313,9 +313,11 @@ Implementa la feature X usando TDD:
 5. Refactoriza solo después de que todos los tests estén en verde
 ```
 
-### 4. Siempre define `--max-iterations`
+### 4. Define `--max-iterations` para la mayoría de las tareas
 
-El subproceso clasificador no es infalible. Un agent atascado que no para de hacer ediciones sin sentido, o uno que se confunde y deja de editar antes de tiempo, debería caer en un tope duro. `--max-iterations 20` es un valor por defecto razonable.
+El subproceso clasificador no es infalible. Un agent atascado que no para de hacer ediciones sin sentido, o uno que se confunde y deja de editar antes de tiempo, debería caer en un tope duro. `--max-iterations 20` es un valor por defecto razonable para la mayoría del trabajo.
+
+**Pero la flag es opcional**. Si genuinamente quieres un bucle ilimitado (por ejemplo, un bucle de mantenimiento de larga duración que pretendes detener manualmente con `/watchdog:stop`, o una ejecución `--no-classifier` donde la convergencia la juzgas tú, no Haiku), **simplemente omite la flag por completo**. **No** necesitas pasar `--max-iterations 0` — esa forma sigue siendo aceptada por compatibilidad, pero la manera natural de expresar "ilimitado" ahora es dejar la flag fuera.
 
 ---
 
