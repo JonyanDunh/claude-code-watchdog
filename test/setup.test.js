@@ -393,6 +393,156 @@ test('setup --prompt-file on unreadable file => exit 1 with permission error', {
   }
 });
 
+test('setup --exit-confirmations N persists in state file', () => {
+  const pid = 200020;
+  const result = runSetup(
+    ['build the api', '--exit-confirmations', '3'],
+    { WATCHDOG_CLAUDE_PID: String(pid) }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const state = JSON.parse(fs.readFileSync(stateFileFor(pid), 'utf8'));
+  assert.equal(state.exit_confirmations, 3);
+  assert.equal(state.no_change_streak, 0);
+  assert.equal(state.no_classifier, false);
+  assert.equal(state.watch_prompt_file, false);
+  assert.equal(state.prompt_file, null);
+  fs.unlinkSync(stateFileFor(pid));
+});
+
+test('setup default (no --exit-confirmations) writes exit_confirmations=1', () => {
+  const pid = 200021;
+  const result = runSetup(['build the api'], { WATCHDOG_CLAUDE_PID: String(pid) });
+  assert.equal(result.status, 0);
+  const state = JSON.parse(fs.readFileSync(stateFileFor(pid), 'utf8'));
+  assert.equal(state.exit_confirmations, 1);
+  assert.equal(state.no_change_streak, 0);
+  fs.unlinkSync(stateFileFor(pid));
+});
+
+test('setup --exit-confirmations rejects 0', () => {
+  const result = runSetup(['build', '--exit-confirmations', '0'], { WATCHDOG_CLAUDE_PID: '1' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--exit-confirmations must be >= 1/);
+});
+
+test('setup --exit-confirmations rejects negative integers', () => {
+  const result = runSetup(['build', '--exit-confirmations', '-2'], { WATCHDOG_CLAUDE_PID: '1' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--exit-confirmations must be a positive integer/);
+});
+
+test('setup --exit-confirmations rejects non-integer', () => {
+  const result = runSetup(['build', '--exit-confirmations', '2.5'], { WATCHDOG_CLAUDE_PID: '1' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--exit-confirmations must be a positive integer/);
+});
+
+test('setup --exit-confirmations without an argument => exit 1', () => {
+  const result = runSetup(['build', '--exit-confirmations'], { WATCHDOG_CLAUDE_PID: '1' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--exit-confirmations requires/);
+});
+
+test('setup --watch-prompt-file with a --prompt-file persists watch flag and resolved path', () => {
+  const pid = 200022;
+  const promptFile = path.join(tmpDir, 'watchable.txt');
+  fs.writeFileSync(promptFile, 'live task');
+
+  const result = runSetup(
+    ['--prompt-file', promptFile, '--watch-prompt-file'],
+    { WATCHDOG_CLAUDE_PID: String(pid) }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+  const state = JSON.parse(fs.readFileSync(stateFileFor(pid), 'utf8'));
+  assert.equal(state.watch_prompt_file, true);
+  assert.equal(state.prompt_file, promptFile);
+  assert.equal(state.prompt, 'live task');
+  fs.unlinkSync(stateFileFor(pid));
+  fs.unlinkSync(promptFile);
+});
+
+test('setup --watch-prompt-file without --prompt-file => exit 1', () => {
+  const result = runSetup(
+    ['inline prompt', '--watch-prompt-file'],
+    { WATCHDOG_CLAUDE_PID: '1' }
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--watch-prompt-file requires --prompt-file/);
+});
+
+test('setup --no-classifier persists in state file and defaults exit_confirmations to 1', () => {
+  const pid = 200023;
+  const result = runSetup(
+    ['build the api', '--no-classifier'],
+    { WATCHDOG_CLAUDE_PID: String(pid) }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+  const state = JSON.parse(fs.readFileSync(stateFileFor(pid), 'utf8'));
+  assert.equal(state.no_classifier, true);
+  // exit_confirmations is still defaulted (1) but the hook will never read it
+  // because it short-circuits on no_classifier first.
+  assert.equal(state.exit_confirmations, 1);
+  fs.unlinkSync(stateFileFor(pid));
+});
+
+test('setup --no-classifier + --exit-confirmations => exit 1 (mutually exclusive)', () => {
+  const result = runSetup(
+    ['build', '--no-classifier', '--exit-confirmations', '3'],
+    { WATCHDOG_CLAUDE_PID: '1' }
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--no-classifier cannot be combined with --exit-confirmations/);
+});
+
+test('setup --no-classifier + --max-iterations 0 is allowed (infinite loop, manual stop only)', () => {
+  const pid = 200024;
+  const result = runSetup(
+    ['build', '--no-classifier', '--max-iterations', '0'],
+    { WATCHDOG_CLAUDE_PID: String(pid) }
+  );
+  assert.equal(result.status, 0);
+  const state = JSON.parse(fs.readFileSync(stateFileFor(pid), 'utf8'));
+  assert.equal(state.no_classifier, true);
+  assert.equal(state.max_iterations, 0);
+  fs.unlinkSync(stateFileFor(pid));
+});
+
+test('setup --prompt-file + --watch-prompt-file + --exit-confirmations + --max-iterations all combine', () => {
+  const pid = 200025;
+  const promptFile = path.join(tmpDir, 'combo.txt');
+  fs.writeFileSync(promptFile, 'combo task');
+
+  const result = runSetup(
+    [
+      '--prompt-file', promptFile,
+      '--watch-prompt-file',
+      '--exit-confirmations', '5',
+      '--max-iterations', '30',
+    ],
+    { WATCHDOG_CLAUDE_PID: String(pid) }
+  );
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+  const state = JSON.parse(fs.readFileSync(stateFileFor(pid), 'utf8'));
+  assert.equal(state.prompt_file, promptFile);
+  assert.equal(state.watch_prompt_file, true);
+  assert.equal(state.exit_confirmations, 5);
+  assert.equal(state.max_iterations, 30);
+  assert.equal(state.no_classifier, false);
+  fs.unlinkSync(stateFileFor(pid));
+  fs.unlinkSync(promptFile);
+});
+
+test('setup --help mentions --exit-confirmations, --watch-prompt-file, and --no-classifier', () => {
+  const result = runSetup(['--help']);
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /--exit-confirmations/);
+  assert.match(result.stderr, /--watch-prompt-file/);
+  assert.match(result.stderr, /--no-classifier/);
+});
+
 test('concurrent setups with different claudePids produce independent state files', () => {
   // Simulate two concurrent Claude Code sessions in the same repo.
   runSetup(['session A task'], { WATCHDOG_CLAUDE_PID: '300001' });

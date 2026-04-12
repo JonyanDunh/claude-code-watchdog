@@ -29,7 +29,7 @@ Instead of a hard-coded tool-name whitelist (which misses `Bash(sed -i …)`, MC
 
 ## Available commands
 
-### `/watchdog:start "<PROMPT>" [--max-iterations N]`
+### `/watchdog:start "<PROMPT>" [--max-iterations N] [--exit-confirmations N] [--prompt-file <path>] [--watch-prompt-file] [--no-classifier]`
 
 Start a Watchdog in the current session.
 
@@ -39,11 +39,19 @@ Start a Watchdog in the current session.
 /watchdog:start "Refactor services/cache.ts to use the new API. Iterate until pnpm test:cache passes." --max-iterations 20
 /watchdog:start "Add tests for auth.ts until coverage hits 80%."
 /watchdog:start --prompt-file ./tmp/my-big-prompt.txt --max-iterations 20
+/watchdog:start "Refactor cache.ts" --exit-confirmations 3 --max-iterations 20
+/watchdog:start --prompt-file ./tmp/task.md --watch-prompt-file --max-iterations 20
+/watchdog:start "Build until I /watchdog:stop" --no-classifier --max-iterations 0
 ```
 
 **Options:**
 
-- `--max-iterations <n>` — safety cap, loop exits after N iterations no matter what. Recommended: 20.
+- `--max-iterations <n>` — safety cap, loop exits after N iterations no matter what. Recommended: 20. Pass `0` for unlimited (the loop only exits via convergence or `/watchdog:stop`).
+- `--exit-confirmations <n>` — require **N consecutive** `NO_FILE_CHANGES` verdicts from the Haiku classifier before allowing the loop to exit. Default `1` (exit on the first clean verdict, identical to pre-1.3.0 behavior). Use a higher value when you want belt-and-suspenders confirmation that the work is really done — for example `--exit-confirmations 3` means the agent must finish three turns in a row without modifying any project file.
+
+  **Strict reset semantics:** the streak counter is reset to `0` whenever the Haiku classifier returns anything other than a clean `NO_FILE_CHANGES` verdict — that includes `FILE_CHANGES`, `AMBIGUOUS`, `CLI_MISSING`, `CLI_FAILED`, or a pure-text turn (no tool invocations). Convergence has to be **unbroken** to count.
+
+  Mutually exclusive with `--no-classifier` (the streak counter is never read in that mode).
 - `--prompt-file <path>` — read the prompt from a file instead of passing it inline. Use this when your prompt contains newlines, quotes, backticks, `$`, or other characters that would break shell-argument parsing in the slash command's `!` block. Mutually exclusive with an inline positional prompt.
 
   **Path handling:**
@@ -56,6 +64,8 @@ Start a Watchdog in the current session.
   - **Line endings are preserved byte-for-byte.** CRLF files are not rewritten to LF — Claude handles both.
   - **Encoding:** the file is read as UTF-8. Non-UTF-8 encodings (GBK, Shift-JIS, etc.) are not supported — convert to UTF-8 first.
   - **Leading/trailing whitespace is trimmed;** interior whitespace and blank lines are preserved exactly.
+- `--watch-prompt-file` — hot-reload the prompt file on every iteration. The Stop hook re-reads `--prompt-file` before deciding whether to re-feed; if the content has changed since the previous turn, the new version is used as the next user turn AND the `--exit-confirmations` streak counter is reset to `0` (a redefined task should not inherit convergence from the old task). If the file has been deleted, become empty, or otherwise can't be read, the cached prompt is silently kept and the loop continues — hot-reload **never** crashes the loop. Requires `--prompt-file`; passing it alone is an error.
+- `--no-classifier` — disable the Haiku classifier entirely. The loop will never call `claude -p --model haiku`; the only ways to exit become `--max-iterations` and `/watchdog:stop`. Pair with `--max-iterations 0` for an unbounded ralph-loop-style run that only stops when you say so. Mutually exclusive with `--exit-confirmations`. Compatible with `--prompt-file` and `--watch-prompt-file`.
 
 **Behavior:**
 
@@ -77,24 +87,24 @@ Show this reference.
 
 The loop exits when **any** of these is true:
 
-- The Haiku classifier judges a turn made no project-file changes (convergence)
+- The Haiku classifier returns `NO_FILE_CHANGES` for **`--exit-confirmations` consecutive turns** (default `1`, so the legacy "exit on first clean verdict" behavior is preserved unless you raise it). Skipped entirely under `--no-classifier`.
 - `--max-iterations` is reached
 - `/watchdog:stop` is invoked
 - The state file is manually removed
 
-A pure-text turn (no tool calls at all) never exits the loop — the agent must actually invoke tools, so it cannot claim completion from memory without doing real verification work.
+A pure-text turn (no tool calls at all) never exits the loop — the agent must actually invoke tools, so it cannot claim completion from memory without doing real verification work. A pure-text turn also resets the `--exit-confirmations` streak counter back to `0`.
 
 ## Per-session isolation
 
 The state file is keyed by the **parent Claude Code process ID**, which Watchdog discovers by walking up the process ancestry from its own `process.ppid`. Every Claude Code session has a distinct PID, so concurrent Watchdogs in the same project directory never collide — even if you run 100 of them at once. No `TERM_SESSION_ID` required: this works on every terminal (Windows Terminal, macOS Terminal.app, GNOME Terminal, Alacritty, tmux, JetBrains, iTerm2, WezTerm, plain ttys, etc.).
 
-## Requirements (1.2.0)
+## Requirements (1.3.0)
 
 | Requirement | Why |
 | --- | --- |
 | **Claude Code 2.1+** | Uses the Stop hook system and marketplace plugin format |
 | **`node`** in `PATH` | All hook and setup logic is JavaScript, runs on Node 18+. Built-in `--test` runner is used for the test suite. |
-| **`claude` CLI** in `PATH` | Used for the headless Haiku classification call. Must be authenticated. |
+| **`claude` CLI** in `PATH` | Used for the headless Haiku classification call. Must be authenticated. **Not required when running with `--no-classifier`.** |
 
 ## Prompt writing tips
 

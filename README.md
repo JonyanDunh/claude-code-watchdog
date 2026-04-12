@@ -129,6 +129,44 @@ The file is read directly by Node (`fs.readFileSync`), bypassing shell escaping 
 
 Works with Linux/macOS/WSL POSIX paths (`/home/you/…`, `./tmp/…`), Windows absolute paths (`C:\Users\you\…`, `C:/Users/you/…`), and UNC paths (`\\server\share\…`). `~` is expanded by your shell (bash/zsh), not by Watchdog — on `cmd.exe` use `%USERPROFILE%\…` or an absolute path. Paths with spaces must be quoted as usual: `--prompt-file "./my prompts/task.md"`. See `/watchdog:help` for the full path-handling reference.
 
+### Stricter convergence with `--exit-confirmations`
+
+By default the loop exits the moment the Haiku classifier returns its first `NO_FILE_CHANGES` verdict. For high-stakes work where you want belt-and-suspenders confirmation that the agent has really converged, raise the bar:
+
+```bash
+/watchdog:start "Refactor services/cache.ts. Iterate until pnpm test:cache passes." --exit-confirmations 3 --max-iterations 20
+```
+
+The loop will now require **three consecutive** clean turns before exiting. The streak counter is reset to `0` the moment the classifier returns anything other than `NO_FILE_CHANGES` — including `FILE_CHANGES`, `AMBIGUOUS`, classifier failures (`CLI_MISSING` / `CLI_FAILED`), or a pure-text turn (no tool invocations). Convergence has to be **unbroken** to count.
+
+Default is `1`, identical to pre-1.3.0 behavior. Mutually exclusive with `--no-classifier`.
+
+### Hot-reload the prompt mid-loop with `--watch-prompt-file`
+
+If you started the loop with `--prompt-file` and want to refine the task while it runs, add `--watch-prompt-file`:
+
+```bash
+/watchdog:start --prompt-file ./tmp/task.md --watch-prompt-file --max-iterations 30
+```
+
+The Stop hook now re-reads the prompt file at the start of every iteration. If the content has changed since the previous turn, the new version becomes the next user turn **and** the `--exit-confirmations` streak counter is reset to `0` (a redefined task should not inherit convergence from the old task).
+
+Hot-reload **never crashes the loop**: if the file is missing, empty, or unreadable when the hook fires, the cached prompt is silently kept and the loop continues. You can edit, rename, or temporarily move the file mid-loop without breaking anything — the next iteration picks up whatever the file looks like at that moment.
+
+Requires `--prompt-file`. Passing `--watch-prompt-file` alone is an error.
+
+### Disable the classifier entirely with `--no-classifier`
+
+For ralph-loop-style runs where you don't want any LLM judging convergence — you'll stop the loop manually or via `--max-iterations`:
+
+```bash
+/watchdog:start "Keep iterating until I /watchdog:stop." --no-classifier --max-iterations 0
+```
+
+The Stop hook skips the Haiku call entirely. The only ways to exit become `--max-iterations` and `/watchdog:stop`. With `--max-iterations 0` you get an unbounded loop that only stops when you say so.
+
+The `claude` CLI is not even required in this mode (the Haiku subprocess is never spawned). Compatible with `--prompt-file` and `--watch-prompt-file`. Mutually exclusive with `--exit-confirmations` — the streak counter is meaningless when there is no classifier returning verdicts.
+
 ---
 
 ## State File
@@ -427,6 +465,8 @@ Watchdog keeps the core mechanic — a Stop hook that re-feeds the prompt — an
 | **State file format** | JSON (parsed with native `JSON.parse`) | Markdown with YAML frontmatter (parsed with sed/awk/grep) |
 | **Runtime** | Node.js 18+ | Bash + jq + POSIX coreutils |
 | **Prompt input** | Inline via `$ARGUMENTS`, **or** `--prompt-file <path>` — reads the file directly with Node's `fs.readFileSync`, bypassing shell argument parsing entirely. Safe for multi-paragraph Markdown containing newlines, quotes, backticks, `$`, etc. UTF-8 BOM is stripped automatically; CRLF is preserved byte-for-byte. | Inline via `$ARGUMENTS` in the slash command's `!` shell block only. Any unescaped `"`, `` ` ``, `$`, or newline in the prompt breaks `bash` parsing with `unexpected EOF`. No file or stdin fallback — multi-paragraph Markdown task specs must be mangled into a single-line, shell-safe string first. |
+| **Convergence flexibility** | `--exit-confirmations N` requires N **consecutive** clean `NO_FILE_CHANGES` verdicts before exit (default 1). `--no-classifier` skips Haiku entirely for ralph-loop-style runs that exit only via `--max-iterations` or `/watchdog:stop`. | A single `<promise>…</promise>` tag-emit-then-grep mechanism with no tunable strictness — either the agent emits the configured promise phrase or it doesn't. |
+| **Prompt evolution** | `--watch-prompt-file` hot-reloads `--prompt-file` on every iteration. You can edit the task spec mid-loop and the next turn picks it up (and resets the convergence streak, since the task changed). Missing/empty/unreadable file silently keeps the cached prompt — hot-reload never crashes the loop. | Prompt is fixed at `/ralph-loop "..."` time and cannot be changed without canceling and restarting the loop. |
 
 See [`NOTICE`](./NOTICE) for the full attribution and the complete list of modifications.
 

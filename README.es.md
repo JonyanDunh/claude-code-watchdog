@@ -129,6 +129,44 @@ El archivo lo lee Node directamente con `fs.readFileSync`, sin pasar por el esca
 
 Funciona con rutas POSIX en Linux/macOS/WSL (`/home/tu/…`, `./tmp/…`), rutas absolutas de Windows (`C:\Users\tu\…`, `C:/Users/tu/…`) y rutas UNC (`\\server\share\…`). El `~` lo expande tu shell (bash/zsh), no Watchdog — en `cmd.exe` usa `%USERPROFILE%\…` o una ruta absoluta. Las rutas con espacios deben ir entre comillas como cualquier otro argumento del shell: `--prompt-file "./my prompts/task.md"`. Para la referencia completa del manejo de rutas, consulta `/watchdog:help`.
 
+### Convergencia más estricta con `--exit-confirmations`
+
+Por defecto, el bucle sale en cuanto el clasificador Haiku devuelve su primer veredicto `NO_FILE_CHANGES`. Para trabajos críticos donde quieres una confirmación con cinturón y tirantes de que el agente realmente convergió, sube el listón:
+
+```bash
+/watchdog:start "Refactoriza services/cache.ts. Itera hasta que pnpm test:cache pase." --exit-confirmations 3 --max-iterations 20
+```
+
+El bucle ahora requerirá **tres turnos consecutivos** limpios antes de salir. El contador del streak se reinicia a `0` en el momento en que el clasificador devuelve cualquier cosa que no sea `NO_FILE_CHANGES` — incluyendo `FILE_CHANGES`, `AMBIGUOUS`, fallos del clasificador (`CLI_MISSING` / `CLI_FAILED`), o un turno solo de texto (sin invocaciones de herramientas). La convergencia tiene que ser **ininterrumpida** para contar.
+
+El valor por defecto es `1`, idéntico al comportamiento anterior a 1.3.0. Mutuamente excluyente con `--no-classifier`.
+
+### Hot-reload del prompt en mitad del bucle con `--watch-prompt-file`
+
+Si iniciaste el bucle con `--prompt-file` y quieres refinar la tarea mientras corre, añade `--watch-prompt-file`:
+
+```bash
+/watchdog:start --prompt-file ./tmp/task.md --watch-prompt-file --max-iterations 30
+```
+
+El Stop hook ahora vuelve a leer el archivo del prompt al inicio de cada iteración. Si el contenido ha cambiado desde el turno anterior, la nueva versión se convierte en el siguiente user turn **y** el contador de streak de `--exit-confirmations` se reinicia a `0` (una tarea redefinida no debería heredar la convergencia de la tarea antigua).
+
+El hot-reload **nunca rompe el bucle**: si el archivo está ausente, vacío, o no se puede leer cuando el hook se dispara, el prompt cacheado se mantiene silenciosamente y el bucle continúa. Puedes editar, renombrar, o mover temporalmente el archivo en mitad del bucle sin romper nada — la siguiente iteración recogerá lo que el archivo tenga en ese momento.
+
+Requiere `--prompt-file`. Pasar `--watch-prompt-file` solo es un error.
+
+### Desactivar el clasificador por completo con `--no-classifier`
+
+Para ejecuciones estilo ralph-loop donde no quieres ningún LLM juzgando la convergencia — pararás el bucle manualmente o vía `--max-iterations`:
+
+```bash
+/watchdog:start "Sigue iterando hasta que yo /watchdog:stop." --no-classifier --max-iterations 0
+```
+
+El Stop hook salta la llamada a Haiku por completo. Las únicas formas de salir se vuelven `--max-iterations` y `/watchdog:stop`. Con `--max-iterations 0` obtienes un bucle ilimitado que solo para cuando tú lo dices.
+
+El CLI `claude` ni siquiera es necesario en este modo (el subproceso de Haiku nunca se lanza). Compatible con `--prompt-file` y `--watch-prompt-file`. Mutuamente excluyente con `--exit-confirmations` — el contador del streak no tiene sentido cuando no hay un clasificador devolviendo veredictos.
+
 ---
 
 ## Archivo de estado
@@ -427,6 +465,8 @@ Watchdog mantiene el mecanismo central — un `Stop hook` que vuelve a inyectar 
 | **Formato del archivo de estado** | JSON (parseado con `JSON.parse` nativo) | Markdown con frontmatter YAML (parseado con sed/awk/grep) |
 | **Runtime** | Node.js 18+ | Bash + jq + POSIX coreutils |
 | **Entrada del prompt** | Inline vía `$ARGUMENTS`, **o** `--prompt-file <path>` — lee el archivo directamente con `fs.readFileSync` de Node, **saltándose por completo el análisis de argumentos del shell**. Seguro para Markdown de varios párrafos con saltos de línea, comillas, backticks, `$`, etc. El BOM UTF-8 se elimina automáticamente; CRLF se preserva byte a byte. | Solo inline vía `$ARGUMENTS` en el bloque `!` del shell del slash command. Cualquier `"`, `` ` ``, `$` o salto de línea sin escapar en el prompt rompe el parser de `bash` con `unexpected EOF`. Sin fallback a archivo ni a stdin — las especificaciones de tareas Markdown de varios párrafos deben convertirse primero en una cadena de una sola línea segura para el shell. |
+| **Flexibilidad de convergencia** | `--exit-confirmations N` requiere N veredictos `NO_FILE_CHANGES` **consecutivos** antes de salir (por defecto 1). `--no-classifier` salta Haiku por completo para ejecuciones estilo ralph-loop que solo salen vía `--max-iterations` o `/watchdog:stop`. | Un único mecanismo de emisión-de-tag-y-grep `<promise>…</promise>` sin ningún botón de estricteza ajustable — o el agente emite la frase de promesa configurada o no lo hace. |
+| **Evolución del prompt** | `--watch-prompt-file` recarga en caliente `--prompt-file` en cada iteración. Puedes editar la spec de la tarea en mitad del bucle y el siguiente turno la recoge (y reinicia el streak de convergencia, porque la tarea cambió). Archivo ausente / vacío / ilegible mantiene silenciosamente el prompt cacheado — el hot-reload nunca rompe el bucle. | El prompt está fijo en el momento de `/ralph-loop "..."` y no se puede cambiar sin cancelar y reiniciar el bucle. |
 
 Ver [`NOTICE`](./NOTICE) para la atribución completa y el listado detallado de modificaciones.
 

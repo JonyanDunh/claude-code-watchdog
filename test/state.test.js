@@ -57,10 +57,64 @@ test('create writes a valid state file with the expected shape', () => {
   assert.equal(state.max_iterations, 20);
   assert.equal(state.claude_pid, 100001);
   assert.equal(state.prompt, 'do the thing');
+  // v1.3.0 fields default to backward-compatible values
+  assert.equal(state.exit_confirmations, 1);
+  assert.equal(state.no_change_streak, 0);
+  assert.equal(state.prompt_file, null);
+  assert.equal(state.watch_prompt_file, false);
+  assert.equal(state.no_classifier, false);
   assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(state.started_at));
   const onDisk = read(filePath);
   assert.deepEqual(onDisk, state);
   remove(filePath);
+});
+
+test('create stores all v1.3.0 options when explicitly passed', () => {
+  const { filePath, state } = create({
+    cwd: tmpDir,
+    claudePid: 100010,
+    prompt: 'task',
+    maxIterations: 30,
+    exitConfirmations: 5,
+    promptFile: '/abs/path/to/prompt.md',
+    watchPromptFile: true,
+    noClassifier: false,
+  });
+  assert.equal(state.exit_confirmations, 5);
+  assert.equal(state.no_change_streak, 0);
+  assert.equal(state.prompt_file, '/abs/path/to/prompt.md');
+  assert.equal(state.watch_prompt_file, true);
+  assert.equal(state.no_classifier, false);
+  remove(filePath);
+});
+
+test('create with noClassifier=true stores the flag', () => {
+  const { filePath, state } = create({
+    cwd: tmpDir,
+    claudePid: 100011,
+    prompt: 'task',
+    maxIterations: 0,
+    noClassifier: true,
+  });
+  assert.equal(state.no_classifier, true);
+  // exit_confirmations still defaulted (the hook short-circuits before
+  // reading it when no_classifier is true)
+  assert.equal(state.exit_confirmations, 1);
+  remove(filePath);
+});
+
+test('isValid still accepts a v1.2.4-shape state file (backward compat)', () => {
+  // Old state files written by v1.2.4 do not have the v1.3.0 fields. The
+  // hook reads them with defaults, so isValid() must NOT reject them.
+  const v124Shape = {
+    active: true,
+    iteration: 3,
+    max_iterations: 20,
+    claude_pid: 12345,
+    started_at: '2026-04-11T00:00:00Z',
+    prompt: 'an old task',
+  };
+  assert.equal(isValid(v124Shape), true);
 });
 
 test('create throws if claudePid is invalid', () => {

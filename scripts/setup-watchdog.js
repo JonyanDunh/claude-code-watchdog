@@ -12,17 +12,23 @@
 // coreutils with a single cross-platform Node file. See NOTICE at the
 // repo root for the full change list.
 
-const fs = require('fs');
-const path = require('path');
-
 const { error, debug } = require('../lib/log');
 const { create } = require('../lib/state');
 const { findClaudePid } = require('../lib/claude-pid');
+const { readPromptFile } = require('../lib/prompt-file');
 
 function parseArgs(argv) {
   const promptParts = [];
   let maxIterations = 0;
   let promptFile = null;
+  // exitConfirmations stays undefined when the user did NOT pass the flag.
+  // The distinction matters because `--no-classifier` + `--exit-confirmations`
+  // is a hard error: if we defaulted to 1 here we couldn't tell whether the
+  // user explicitly typed `--exit-confirmations 1` (which should error) or
+  // just left the flag off (which should be silently allowed).
+  let exitConfirmations;
+  let watchPromptFile = false;
+  let noClassifier = false;
   let help = false;
 
   for (let i = 0; i < argv.length; i++) {
@@ -52,56 +58,56 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (token === '--exit-confirmations') {
+      const next = argv[i + 1];
+      if (next === undefined) {
+        return { error: '--exit-confirmations requires a positive integer argument' };
+      }
+      if (!/^\d+$/.test(next)) {
+        return { error: `--exit-confirmations must be a positive integer, got: ${next}` };
+      }
+      const n = Number(next);
+      if (n < 1) {
+        // Zero would mean "exit before Haiku ever judges anything", which
+        // is functionally equivalent to disabling the loop — pointless and
+        // almost certainly a typo. Force >= 1.
+        return { error: `--exit-confirmations must be >= 1, got: ${next}` };
+      }
+      exitConfirmations = n;
+      i += 1;
+      continue;
+    }
+    if (token === '--watch-prompt-file') {
+      // Boolean flag; no value follows. Validity (must be paired with
+      // --prompt-file) is checked in main() after the full parse, so the
+      // error message can mention the missing companion flag explicitly.
+      watchPromptFile = true;
+      continue;
+    }
+    if (token === '--no-classifier') {
+      // Boolean flag; no value follows. Mutual exclusion with
+      // --exit-confirmations is checked in main().
+      noClassifier = true;
+      continue;
+    }
     promptParts.push(token);
   }
 
-  return { promptParts, maxIterations, promptFile, help };
+  return {
+    promptParts,
+    maxIterations,
+    promptFile,
+    exitConfirmations,
+    watchPromptFile,
+    noClassifier,
+    help,
+  };
 }
 
-// Read a prompt from a file, bypassing shell escaping entirely. Used when
-// the prompt contains characters that would break `$ARGUMENTS` substitution
-// inside the slash command's `!` block — newlines, quotes, backticks,
-// `$`, etc. Returns `{ prompt }` on success or `{ error }` on failure.
-//
-// Path handling is delegated to path.resolve(), which is platform-aware:
-//   - Absolute POSIX paths (/home/…) pass through unchanged on Linux/Mac.
-//   - Absolute Windows paths (C:\…, C:/…, \\server\share\…) pass through
-//     unchanged on Windows.
-//   - Relative paths are resolved against process.cwd() on every platform.
-// `~` is NOT expanded here — that's the shell's job, and bash/zsh already
-// expand it before the args reach this script. cmd.exe users should pass
-// absolute paths or use %USERPROFILE%.
-function readPromptFile(promptFile) {
-  const resolved = path.resolve(process.cwd(), promptFile);
-  let contents;
-  try {
-    contents = fs.readFileSync(resolved, 'utf8');
-  } catch (e) {
-    if (e.code === 'ENOENT') {
-      return { error: `prompt file not found: ${resolved}` };
-    }
-    if (e.code === 'EISDIR') {
-      return { error: `--prompt-file expects a file, got a directory: ${resolved}` };
-    }
-    if (e.code === 'EACCES' || e.code === 'EPERM') {
-      return { error: `permission denied reading prompt file: ${resolved}` };
-    }
-    return { error: `failed to read prompt file ${resolved}: ${e.message}` };
-  }
-  // Strip UTF-8 BOM. Windows tools (Notepad, PowerShell's `Set-Content`
-  // without `-Encoding utf8NoBOM`) frequently add U+FEFF at the start of
-  // UTF-8 files. `.trim()` does not remove it (BOM is not whitespace), so
-  // without this line the first char of the prompt Claude sees would be
-  // an invisible zero-width marker.
-  if (contents.charCodeAt(0) === 0xfeff) {
-    contents = contents.slice(1);
-  }
-  const prompt = contents.trim();
-  if (!prompt) {
-    return { error: `prompt file is empty: ${resolved}` };
-  }
-  return { prompt };
-}
+// readPromptFile() lives in lib/prompt-file.js so the stop hook can reuse
+// the exact same BOM strip / trim / error mapping when --watch-prompt-file
+// hot-reloads the prompt mid-loop. See that file for the full path-handling
+// commentary.
 
 function printHelp() {
   // Help is intentionally short and routed to stderr so the slash command's
@@ -116,7 +122,9 @@ function printHelp() {
     '',
     'Quick usage:',
     '    /watchdog:start "<your prompt>" [--max-iterations N]',
-    '    /watchdog:start --prompt-file <path> [--max-iterations N]',
+    '    /watchdog:start --prompt-file <path> [--watch-prompt-file] [--max-iterations N]',
+    '    /watchdog:start "..." --exit-confirmations 3 --max-iterations 20',
+    '    /watchdog:start "..." --no-classifier --max-iterations 20',
     '    /watchdog:stop',
   ];
   for (const line of lines) process.stderr.write(`${line}\n`);
@@ -144,7 +152,31 @@ function main() {
     process.exit(1);
   }
 
+  // --watch-prompt-file is meaningless without --prompt-file (there is no
+  // file to watch). The hot-reload code in stop-hook.js keys off both
+  // fields together, so this combination would silently do nothing —
+  // surface it as an error so the user gets immediate feedback.
+  if (parsed.watchPromptFile && !parsed.promptFile) {
+    error('--watch-prompt-file requires --prompt-file');
+    process.stderr.write('   Hot-reload only makes sense when the prompt comes from a file.\n');
+    process.stderr.write('   Add --prompt-file <path> or drop --watch-prompt-file.\n');
+    process.exit(1);
+  }
+
+  // --no-classifier disables the Haiku judgment loop entirely; the streak
+  // counter is never read in that mode. Combining the two is almost
+  // certainly user confusion — fail loudly so they pick one consciously.
+  if (parsed.noClassifier && parsed.exitConfirmations !== undefined) {
+    error('--no-classifier cannot be combined with --exit-confirmations');
+    process.stderr.write('   --no-classifier disables Haiku entirely, so the convergence streak\n');
+    process.stderr.write('   counted by --exit-confirmations is never incremented. The loop will\n');
+    process.stderr.write('   only exit via --max-iterations or /watchdog:stop.\n');
+    process.stderr.write('   Pick one: either drop --no-classifier or drop --exit-confirmations.\n');
+    process.exit(1);
+  }
+
   let prompt;
+  let resolvedPromptFile = null;
   if (parsed.promptFile) {
     const result = readPromptFile(parsed.promptFile);
     if (result.error) {
@@ -152,6 +184,10 @@ function main() {
       process.exit(1);
     }
     prompt = result.prompt;
+    // Capture the resolved absolute path so the stop hook's hot-reload
+    // path doesn't have to re-resolve a relative path against a possibly-
+    // different cwd later.
+    resolvedPromptFile = result.resolvedPath;
   } else {
     prompt = parsed.promptParts.join(' ').trim();
   }
@@ -191,9 +227,15 @@ function main() {
     claudePid,
     prompt,
     maxIterations: parsed.maxIterations,
+    // exit_confirmations defaults to 1 inside create() when undefined,
+    // which preserves the pre-1.3.0 single-confirmation exit semantics.
+    exitConfirmations: parsed.exitConfirmations,
+    promptFile: resolvedPromptFile,
+    watchPromptFile: parsed.watchPromptFile,
+    noClassifier: parsed.noClassifier,
   });
   debug(
-    `setup-watchdog.js: created state file ${filePath} — claudePid=${claudePid}, max=${parsed.maxIterations}, prompt_head='${prompt.slice(0, 60)}'`
+    `setup-watchdog.js: created state file ${filePath} — claudePid=${claudePid}, max=${parsed.maxIterations}, exit_confirmations=${parsed.exitConfirmations || 1}, watch=${parsed.watchPromptFile}, no_classifier=${parsed.noClassifier}, prompt_file=${resolvedPromptFile || 'none'}, prompt_head='${prompt.slice(0, 60)}'`
   );
 
   // Output ONLY the user's prompt to stdout. Everything Claude Code captures
