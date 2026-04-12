@@ -471,6 +471,19 @@ test('setup --watch-prompt-file without --prompt-file => exit 1', () => {
   assert.match(result.stderr, /--watch-prompt-file requires --prompt-file/);
 });
 
+test('setup --watch-prompt-file alone (no prompt at all) => exit 1 with the same error', () => {
+  // Edge case: user passes only --watch-prompt-file with no inline prompt
+  // and no --prompt-file. The validation order in main() must catch the
+  // missing --prompt-file companion before falling through to the empty-
+  // prompt check, so the user gets the *useful* error, not a generic
+  // "No prompt provided" diagnostic.
+  const result = runSetup(['--watch-prompt-file'], { WATCHDOG_CLAUDE_PID: '1' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--watch-prompt-file requires --prompt-file/);
+  // And NOT the generic empty-prompt fallback:
+  assert.doesNotMatch(result.stderr, /No prompt provided/);
+});
+
 test('setup --no-classifier persists in state file and defaults exit_confirmations to 1', () => {
   const pid = 200023;
   const result = runSetup(
