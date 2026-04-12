@@ -160,10 +160,10 @@ Cần `--prompt-file`. **Truyền `--watch-prompt-file` một mình là lỗi**.
 Cho các lần chạy kiểu ralph-loop mà bạn không muốn bất kỳ LLM nào đánh giá hội tụ — bạn sẽ dừng vòng lặp thủ công hoặc qua `--max-iterations`:
 
 ```bash
-/watchdog:start "Cứ lặp cho đến khi tôi /watchdog:stop." --no-classifier --max-iterations 0
+/watchdog:start "Cứ lặp cho đến khi tôi /watchdog:stop." --no-classifier
 ```
 
-Stop hook bỏ qua hoàn toàn lời gọi Haiku. Cách thoát duy nhất trở thành `--max-iterations` và `/watchdog:stop`. Với `--max-iterations 0` bạn có một vòng lặp không giới hạn chỉ dừng khi bạn ra lệnh.
+Stop hook bỏ qua hoàn toàn lời gọi Haiku. Cách thoát duy nhất trở thành `--max-iterations` và `/watchdog:stop`. **`--max-iterations` là tùy chọn** — nếu bạn bỏ qua nó (như trong ví dụ trên), vòng lặp thực sự không giới hạn và chỉ dừng khi bạn ra lệnh. **Bạn không còn cần truyền `--max-iterations 0`** để có nghĩa là "không giới hạn"; chỉ cần bỏ flag đó hoàn toàn. (Dạng `0` vẫn được chấp nhận vì lý do tương thích ngược.)
 
 CLI `claude` thậm chí không cần thiết trong chế độ này (subprocess Haiku không bao giờ được spawn). Tương thích với `--prompt-file` và `--watch-prompt-file`. **Không tương thích với `--exit-confirmations`** — bộ đếm streak vô nghĩa khi không có bộ phân loại trả về kết luận.
 
@@ -313,9 +313,11 @@ Implement feature X using TDD:
 5. Refactor only after all tests are green
 ```
 
-### 4. Luôn đặt `--max-iterations`
+### 4. Đặt `--max-iterations` cho hầu hết các task
 
-Classifier subprocess không phải là thánh. Một agent bị kẹt mà cứ loay hoay sửa linh tinh vô nghĩa, hoặc một agent bị rối rồi ngừng sửa quá sớm, đều cần rơi vào một cú dừng cứng. `--max-iterations 20` là một mặc định hợp lý.
+Classifier subprocess không phải là thánh. Một agent bị kẹt mà cứ loay hoay sửa linh tinh vô nghĩa, hoặc một agent bị rối rồi ngừng sửa quá sớm, đều cần rơi vào một cú dừng cứng. `--max-iterations 20` là một mặc định hợp lý cho hầu hết công việc.
+
+**Tuy nhiên flag này là tùy chọn**. Nếu bạn thực sự muốn vòng lặp không giới hạn (ví dụ: một vòng lặp bảo trì chạy lâu mà bạn định dừng thủ công bằng `/watchdog:stop`, hoặc một lần chạy `--no-classifier` mà việc hội tụ do bạn — không phải Haiku — đánh giá), **chỉ cần bỏ flag hoàn toàn**. Bạn **không** cần truyền `--max-iterations 0` — dạng đó vẫn được chấp nhận vì lý do tương thích ngược, nhưng cách tự nhiên để biểu đạt "không giới hạn" giờ đây là không truyền flag.
 
 ---
 
